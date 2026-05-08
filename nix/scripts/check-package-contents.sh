@@ -35,6 +35,18 @@ require_path "${root}/skills"
 require_path "${root}/node_modules/hasown"
 require_path "${root}/node_modules/combined-stream"
 
+public_surface_loader="$(
+  grep -Rsl "function loadBundledPluginPublicArtifactModuleSync" "${root}/dist" | head -1
+)"
+if [ -z "$public_surface_loader" ]; then
+  echo "Missing bundled plugin public surface loader" >&2
+  exit 1
+fi
+if grep -q "rejectHardlinks: true" "$public_surface_loader"; then
+  echo "Bundled plugin public surface loader still rejects hardlinked package files" >&2
+  exit 1
+fi
+
 require_js_alias_target() {
   alias="$1"
   alias_path="${root}/dist/${alias}"

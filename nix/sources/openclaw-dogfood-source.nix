@@ -12,6 +12,5 @@
     hash = "sha256-jndOOSSFROyrK4RiwAsJfUuCJTj7qbmmm4Qz8BqtJ/c=";
   };
 
-  applyPublicSurfaceHardlinksPatch = false;
   applySkipPluginAutoEnableNixModePatch = false;
 }

@@ -105,6 +105,9 @@
               package-contents = pkgs.callPackage ./nix/checks/openclaw-package-contents.nix {
                 openclawGateway = packageSetStable.openclaw-gateway;
               };
+              package-contents-dogfood = pkgs.callPackage ./nix/checks/openclaw-package-contents.nix {
+                openclawGateway = packageSetDogfood.openclaw-gateway;
+              };
               default-instance = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix { };
               config-validity = pkgs.callPackage ./nix/checks/openclaw-config-validity.nix {
                 openclawGateway = packageSetStable.openclaw-gateway;
