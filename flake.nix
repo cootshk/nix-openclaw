@@ -96,6 +96,7 @@
               package-contents = pkgs.callPackage ./nix/checks/openclaw-package-contents.nix {
                 openclawGateway = packageSetStable.openclaw-gateway;
               };
+              default-instance = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix { };
               config-validity = pkgs.callPackage ./nix/checks/openclaw-config-validity.nix {
                 openclawGateway = packageSetStable.openclaw-gateway;
               };
@@ -120,7 +121,6 @@
                 {
                   config-options = sourceChecks;
                   source-checks = sourceChecks;
-                  default-instance = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix { };
                   hm-activation = import ./nix/checks/openclaw-hm-activation.nix {
                     inherit pkgs home-manager;
                   };

@@ -103,8 +103,8 @@ let
               lib.file.mkOutOfStoreSymlink = path: path;
               programs.openclaw = {
                 enable = true;
-                launchd.enable = false;
-                systemd.enable = true;
+                launchd.enable = pkgs.stdenv.hostPlatform.isDarwin;
+                systemd.enable = pkgs.stdenv.hostPlatform.isLinux;
               }
               // openclawConfig;
             };
@@ -135,10 +135,13 @@ let
 
   defaultEval = moduleEval { };
   defaultConfig = builtins.fromJSON defaultEval.config.home.file.".openclaw/openclaw.json".text;
-  hasUnit = builtins.hasAttr "openclaw-gateway" defaultEval.config.systemd.user.services;
+  hasLinuxUnit = builtins.hasAttr "openclaw-gateway" defaultEval.config.systemd.user.services;
+  hasDarwinAgent = builtins.hasAttr "com.steipete.openclaw.gateway" defaultEval.config.launchd.agents;
   defaultCheck = builtins.deepSeq (requireNoAssertionFailures "default instance" defaultEval) (
-    if !hasUnit then
+    if pkgs.stdenv.hostPlatform.isLinux && !hasLinuxUnit then
       throw "Default OpenClaw instance missing systemd.unitName."
+    else if pkgs.stdenv.hostPlatform.isDarwin && !hasDarwinAgent then
+      throw "Default OpenClaw instance missing launchd.label."
     else if (((defaultConfig.gateway or { }).mode or null) != "local") then
       throw "Default OpenClaw instance missing gateway.mode."
     else
