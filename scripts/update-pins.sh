@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
-  echo "This script is intended to run in GitHub Actions (see .github/workflows/yolo-update.yml). Refusing to run locally." >&2
+  echo "This script is intended to run in GitHub Actions (see .github/workflows/pin-stable-openclaw-version.yml). Refusing to run locally." >&2
   exit 1
 fi
 
@@ -23,17 +23,26 @@ Usage:
 EOF
 }
 
-require_cmd() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "$1 is required but not installed." >&2
-    exit 1
-  fi
+require_cmds() {
+  local cmd
+  for cmd in "$@"; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      echo "$cmd is required but not installed." >&2
+      exit 1
+    fi
+  done
 }
 
 current_field() {
   local file="$1"
   local key="$2"
   awk -F'"' -v key="$key" '$0 ~ key" =" { print $2; exit }' "$file"
+}
+
+set_pnpm_deps_hash() {
+  local hash="$1"
+
+  perl -0pi -e "s|pnpmDepsHash = \"[^\"]*\";|pnpmDepsHash = \"${hash}\";|" "$source_file"
 }
 
 resolve_release_tag_sha() {
@@ -61,16 +70,11 @@ prefetch_json() {
   nix --extra-experimental-features "nix-command flakes" store prefetch-file --unpack --json "$url"
 }
 
-prefetch_file_json() {
-  local url="$1"
-  nix --extra-experimental-features "nix-command flakes" store prefetch-file --json "$url"
-}
-
 unpacked_zip_hash() {
   local url="$1"
   local archive_prefetch archive_path unpack_dir app_list app_count app_path app_hash
 
-  archive_prefetch=$(prefetch_file_json "$url")
+  archive_prefetch=$(nix --extra-experimental-features "nix-command flakes" store prefetch-file --json "$url")
   archive_path=$(printf '%s' "$archive_prefetch" | jq -r '.path // .storePath // empty')
   if [[ -z "$archive_path" || ! -f "$archive_path" ]]; then
     echo "Failed to prefetch app archive for $url" >&2
@@ -78,30 +82,28 @@ unpacked_zip_hash() {
   fi
 
   unpack_dir=$(mktemp -d)
+  fail_zip() { rm -rf "$unpack_dir"; echo "$1" >&2; }
+
   if ! unzip -q "$archive_path" -d "$unpack_dir"; then
-    rm -rf "$unpack_dir"
-    echo "Failed to unzip app archive: $archive_path" >&2
+    fail_zip "Failed to unzip app archive: $archive_path"
     return 1
   fi
 
   app_list=$(find "$unpack_dir" -maxdepth 3 -type d -name '*.app' -print)
   app_count=$(printf '%s\n' "$app_list" | sed '/^$/d' | wc -l | tr -d ' ')
   if [[ "$app_count" != "1" ]]; then
-    rm -rf "$unpack_dir"
-    echo "Expected exactly one .app in app archive; found $app_count" >&2
+    fail_zip "Expected exactly one .app in app archive; found $app_count"
     return 1
   fi
 
   app_path=$(printf '%s\n' "$app_list" | sed -n '1p')
   if [[ ! -d "$app_path/Contents" ]]; then
-    rm -rf "$unpack_dir"
-    echo "App archive contains an invalid app bundle: $app_path" >&2
+    fail_zip "App archive contains an invalid app bundle: $app_path"
     return 1
   fi
 
   if ! app_hash=$(nix --extra-experimental-features "nix-command flakes" hash path "$unpack_dir"); then
-    rm -rf "$unpack_dir"
-    echo "Failed to hash unpacked app archive: $archive_path" >&2
+    fail_zip "Failed to hash unpacked app archive: $archive_path"
     return 1
   fi
   rm -rf "$unpack_dir"
@@ -119,7 +121,7 @@ refresh_pnpm_hash() {
       return 1
     fi
     log "pnpmDepsHash mismatch detected: $pnpm_hash"
-    perl -0pi -e "s|pnpmDepsHash = \"[^\"]*\";|pnpmDepsHash = \"${pnpm_hash}\";|" "$source_file"
+    set_pnpm_deps_hash "$pnpm_hash"
     nix build .#openclaw-gateway --accept-flake-config >"$build_log" 2>&1 || {
       tail -n 200 "$build_log" >&2 || true
       rm -f "$build_log"
@@ -129,9 +131,93 @@ refresh_pnpm_hash() {
   rm -f "$build_log"
 }
 
+source_pnpm_major() {
+  local source_path="$1"
+  local package_manager major
+  package_manager=$(jq -r '.packageManager // empty' "$source_path/package.json")
+
+  if [[ ! "$package_manager" =~ ^pnpm@([0-9]+)\. ]]; then
+    echo "Failed to resolve pnpm major from packageManager in $source_path/package.json" >&2
+    return 1
+  fi
+  major="${BASH_REMATCH[1]}"
+
+  case "$major" in
+    10 | 11) printf '%s\n' "$major" ;;
+    *)
+      echo "Unsupported OpenClaw pnpm major $major from $package_manager" >&2
+      return 1
+      ;;
+  esac
+}
+
+pnpm_shell_package() {
+  local major="$1"
+  case "$major" in
+    10) printf '%s\n' "nixpkgs#pnpm_10" ;;
+    11) printf '%s\n' "$repo_root#pnpm_11" ;;
+    *)
+      echo "Unsupported OpenClaw pnpm major $major" >&2
+      return 1
+      ;;
+  esac
+}
+
+source_public_surface_hardlinks_patch() {
+  local source_path="$1"
+  local loader="$source_path/src/plugins/public-surface-loader.ts"
+
+  if [[ -f "$loader" ]] && grep -q 'openRootFileSync' "$loader"; then
+    printf '%s\n' "../patches/allow-package-public-surface-hardlinks-open-root.patch"
+    return 0
+  fi
+  printf '%s\n' ""
+}
+
+set_source_public_surface_hardlinks_patch() {
+  local patch_path="$1"
+  if [[ -n "$patch_path" ]]; then
+    if grep -q 'publicSurfaceHardlinksPatch = ' "$source_file"; then
+      perl -0pi -e "s|publicSurfaceHardlinksPatch = [^;]+;|publicSurfaceHardlinksPatch = ${patch_path};|" "$source_file"
+    else
+      perl -0pi -e "s|pnpmMajor = \"([^\"]+)\";|pnpmMajor = \"\$1\";\n  publicSurfaceHardlinksPatch = ${patch_path};|" "$source_file"
+    fi
+  else
+    perl -0pi -e 's|  publicSurfaceHardlinksPatch = [^;]+;\n||g' "$source_file"
+  fi
+}
+
+source_needs_skip_plugin_auto_enable_nix_mode_patch() {
+  local source_path="$1"
+  local startup_config="$source_path/src/gateway/server-startup-config.ts"
+
+  if [[ ! -f "$startup_config" ]] || grep -q 'replaceConfigFile' "$startup_config"; then
+    printf '%s\n' "true"
+  else
+    printf '%s\n' "false"
+  fi
+}
+
+set_source_skip_plugin_auto_enable_nix_mode_patch() {
+  local enabled="$1"
+  if [[ "$enabled" == "false" ]]; then
+    if grep -q 'applySkipPluginAutoEnableNixModePatch = ' "$source_file"; then
+      perl -0pi -e 's|applySkipPluginAutoEnableNixModePatch = [^;]+;|applySkipPluginAutoEnableNixModePatch = false;|' "$source_file"
+    elif grep -q 'publicSurfaceHardlinksPatch = ' "$source_file"; then
+      perl -0pi -e 's|publicSurfaceHardlinksPatch = ([^;]+);|publicSurfaceHardlinksPatch = $1;\n  applySkipPluginAutoEnableNixModePatch = false;|' "$source_file"
+    else
+      perl -0pi -e 's|pnpmMajor = "([^"]+)";|pnpmMajor = "$1";\n  applySkipPluginAutoEnableNixModePatch = false;|' "$source_file"
+    fi
+  else
+    perl -0pi -e 's|  applySkipPluginAutoEnableNixModePatch = [^;]+;\n||g' "$source_file"
+  fi
+}
+
 regenerate_config_options() {
   local selected_sha="$1"
   local source_store_path="$2"
+  local pnpm_major="$3"
+  local pnpm_pkg
   local tmp_src
   tmp_src=$(mktemp -d)
 
@@ -147,12 +233,15 @@ regenerate_config_options() {
   fi
 
   chmod -R u+w "$tmp_src/src"
+  pnpm_pkg=$(pnpm_shell_package "$pnpm_major")
 
-  nix shell --extra-experimental-features "nix-command flakes" nixpkgs#nodejs_22 nixpkgs#pnpm_10 -c \
-    bash -c "cd '$tmp_src/src' && pnpm install --frozen-lockfile --ignore-scripts"
+  nix shell --extra-experimental-features "nix-command flakes" --accept-flake-config --inputs-from "$repo_root" \
+    nixpkgs#nodejs_22 "$pnpm_pkg" -c \
+    bash -c "cd '$tmp_src/src' && PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false pnpm install --frozen-lockfile --ignore-scripts"
 
-  nix shell --extra-experimental-features "nix-command flakes" nixpkgs#nodejs_22 nixpkgs#pnpm_10 -c \
-    bash -c "cd '$tmp_src/src' && OPENCLAW_SCHEMA_REV='${selected_sha}' pnpm exec tsx '$repo_root/nix/scripts/generate-config-options.ts' --repo . --out '$config_options_file'"
+  nix shell --extra-experimental-features "nix-command flakes" --accept-flake-config --inputs-from "$repo_root" \
+    nixpkgs#nodejs_22 "$pnpm_pkg" -c \
+    bash -c "cd '$tmp_src/src' && PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=false OPENCLAW_SCHEMA_REV='${selected_sha}' pnpm exec tsx '$repo_root/nix/scripts/generate-config-options.ts' --repo . --out '$config_options_file'"
 
   rm -rf "$tmp_src"
 }
@@ -221,7 +310,7 @@ apply_release() {
   local selected_sha="$2"
   local app_tag="$3"
   local app_url="$4"
-  local source_version source_url source_prefetch source_hash source_store_path app_version app_hash
+  local source_version source_url source_prefetch source_hash source_store_path selected_pnpm_major public_surface_hardlinks_patch apply_skip_plugin_auto_enable_patch app_version app_hash
   local backup_dir success
 
   source_version="${source_tag#v}"
@@ -234,6 +323,9 @@ apply_release() {
     echo "Failed to resolve source hash/path for $selected_sha" >&2
     exit 1
   fi
+  selected_pnpm_major=$(source_pnpm_major "$source_store_path")
+  public_surface_hardlinks_patch=$(source_public_surface_hardlinks_patch "$source_store_path")
+  apply_skip_plugin_auto_enable_patch=$(source_needs_skip_plugin_auto_enable_nix_mode_patch "$source_store_path")
 
   if [[ -n "$app_tag" || -n "$app_url" ]]; then
     if [[ -z "$app_tag" || -z "$app_url" ]]; then
@@ -267,8 +359,15 @@ apply_release() {
 
   perl -0pi -e 's|  releaseTag = "[^"]+";\n||g; s|  releaseVersion = "[^"]+";\n||g;' "$source_file"
   perl -0pi -e "s|rev = \"[^\"]+\";|releaseTag = \"${source_tag}\";\n  releaseVersion = \"${source_version}\";\n  rev = \"${selected_sha}\";|" "$source_file"
+  if grep -q 'pnpmMajor = ' "$source_file"; then
+    perl -0pi -e "s|pnpmMajor = \"[^\"]+\";|pnpmMajor = \"${selected_pnpm_major}\";|" "$source_file"
+  else
+    perl -0pi -e "s|releaseVersion = \"[^\"]+\";|releaseVersion = \"${source_version}\";\n  pnpmMajor = \"${selected_pnpm_major}\";|" "$source_file"
+  fi
+  set_source_public_surface_hardlinks_patch "$public_surface_hardlinks_patch"
+  set_source_skip_plugin_auto_enable_nix_mode_patch "$apply_skip_plugin_auto_enable_patch"
   perl -0pi -e "s|hash = \"[^\"]+\";|hash = \"${source_hash}\";|" "$source_file"
-  perl -0pi -e 's|pnpmDepsHash = "[^"]*";|pnpmDepsHash = "";|' "$source_file"
+  set_pnpm_deps_hash ""
 
   if [[ -n "${app_version:-}" ]]; then
     perl -0pi -e "s|version = \"[^\"]+\";|version = \"${app_version}\";|" "$app_file"
@@ -277,7 +376,7 @@ apply_release() {
   fi
 
   refresh_pnpm_hash
-  regenerate_config_options "$selected_sha" "$source_store_path"
+  regenerate_config_options "$selected_sha" "$source_store_path" "$selected_pnpm_major"
 
   success=1
 }
@@ -285,29 +384,14 @@ apply_release() {
 mode="${1:-}"
 case "$mode" in
   select)
-    if [[ $# -ne 1 ]]; then
-      usage
-      exit 1
-    fi
-    require_cmd jq
-    require_cmd gh
-    require_cmd node
+    [[ $# -eq 1 ]] || { usage; exit 1; }
+    require_cmds jq gh node
     select_release
     ;;
   apply)
-    if [[ $# -ne 5 ]]; then
-      usage
-      exit 1
-    fi
-    require_cmd jq
-    require_cmd nix
-    require_cmd perl
-    require_cmd unzip
-    require_cmd find
+    [[ $# -eq 5 ]] || { usage; exit 1; }
+    require_cmds jq nix perl unzip find
     apply_release "$2" "$3" "$4" "$5"
     ;;
-  *)
-    usage
-    exit 1
-    ;;
+  *) usage; exit 1 ;;
 esac
