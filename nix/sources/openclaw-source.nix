@@ -3,11 +3,11 @@
   owner = "openclaw";
   repo = "openclaw";
   pnpmMajor = "11";
-  publicSurfaceHardlinksPatch = ../patches/allow-package-public-surface-hardlinks-open-root.patch;
+  applyPublicSurfaceHardlinksPatch = false;
   applySkipPluginAutoEnableNixModePatch = false;
-  releaseTag = "v2026.5.12";
-  releaseVersion = "2026.5.12";
-  rev = "f066dd2f31c231f38fbcaacd6f6dfce0801143b3";
-  hash = "sha256-URuoljISNcDLuWUwOpZoFjPNVOmbThC9r00uShPR4Co=";
-  pnpmDepsHash = "sha256-c2q59h1uZg31prWklcBJ87WnB0Bac4Qrp1TJA4/nB+8=";
+  releaseTag = "v2026.5.20";
+  releaseVersion = "2026.5.20";
+  rev = "e510042870cf248c0e0461b6f8d427326266141d";
+  hash = "sha256-xMSuPM71t166k6wfqeJ07JBUuvzCtbYUMpyEZ8OGK9s=";
+  pnpmDepsHash = "sha256-HZVuoIlxKQc6xTd6/OW7DVn6YE9zGjEmXWfFb0toUDg=";
 }

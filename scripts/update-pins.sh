@@ -113,7 +113,7 @@ unpacked_zip_hash() {
 refresh_pnpm_hash() {
   local build_log pnpm_hash
   build_log=$(mktemp)
-  if ! nix build .#openclaw-gateway --accept-flake-config >"$build_log" 2>&1; then
+  if ! nix --extra-experimental-features "nix-command flakes" build .#openclaw-gateway --accept-flake-config >"$build_log" 2>&1; then
     pnpm_hash=$(grep -Eo 'got: *sha256-[A-Za-z0-9+/=]+' "$build_log" | head -n 1 | sed 's/.*got: *//' || true)
     if [[ -z "$pnpm_hash" ]]; then
       tail -n 200 "$build_log" >&2 || true
@@ -122,7 +122,7 @@ refresh_pnpm_hash() {
     fi
     log "pnpmDepsHash mismatch detected: $pnpm_hash"
     set_pnpm_deps_hash "$pnpm_hash"
-    nix build .#openclaw-gateway --accept-flake-config >"$build_log" 2>&1 || {
+    nix --extra-experimental-features "nix-command flakes" build .#openclaw-gateway --accept-flake-config >"$build_log" 2>&1 || {
       tail -n 200 "$build_log" >&2 || true
       rm -f "$build_log"
       return 1
@@ -167,7 +167,7 @@ source_public_surface_hardlinks_patch() {
   local source_path="$1"
   local loader="$source_path/src/plugins/public-surface-loader.ts"
 
-  if [[ -f "$loader" ]] && grep -q 'openRootFileSync' "$loader"; then
+  if [[ -f "$loader" ]] && grep -q 'rejectHardlinks: true' "$loader"; then
     printf '%s\n' "../patches/allow-package-public-surface-hardlinks-open-root.patch"
     return 0
   fi
@@ -176,14 +176,12 @@ source_public_surface_hardlinks_patch() {
 
 set_source_public_surface_hardlinks_patch() {
   local patch_path="$1"
+  perl -0pi -e 's|  applyPublicSurfaceHardlinksPatch = [^;]+;\n||g; s|  publicSurfaceHardlinksPatch = [^;]+;\n||g' "$source_file"
+
   if [[ -n "$patch_path" ]]; then
-    if grep -q 'publicSurfaceHardlinksPatch = ' "$source_file"; then
-      perl -0pi -e "s|publicSurfaceHardlinksPatch = [^;]+;|publicSurfaceHardlinksPatch = ${patch_path};|" "$source_file"
-    else
-      perl -0pi -e "s|pnpmMajor = \"([^\"]+)\";|pnpmMajor = \"\$1\";\n  publicSurfaceHardlinksPatch = ${patch_path};|" "$source_file"
-    fi
+    perl -0pi -e "s|pnpmMajor = \"([^\"]+)\";|pnpmMajor = \"\$1\";\n  applyPublicSurfaceHardlinksPatch = true;\n  publicSurfaceHardlinksPatch = ${patch_path};|" "$source_file"
   else
-    perl -0pi -e 's|  publicSurfaceHardlinksPatch = [^;]+;\n||g' "$source_file"
+    perl -0pi -e "s|pnpmMajor = \"([^\"]+)\";|pnpmMajor = \"\$1\";\n  applyPublicSurfaceHardlinksPatch = false;|" "$source_file"
   fi
 }
 
