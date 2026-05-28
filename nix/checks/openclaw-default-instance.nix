@@ -397,6 +397,8 @@ let
     else
       throw "memory.backend = qmd did not add QMD to the internal OpenClaw runtime."
   );
+  qmdMemoryPackages = lib.filter packageHasQmd qmdMemoryEval.config.home.packages;
+  qmdMemoryPackage = if qmdMemoryPackages == [ ] then null else builtins.head qmdMemoryPackages;
 
   runtimeProfileEval = moduleEval {
     runtimePackages = [ pkgs.jq ];
@@ -546,6 +548,8 @@ stdenv.mkDerivation {
   pname = "openclaw-default-instance";
   version = "1";
   dontUnpack = true;
+  # Evaluation alone missed installPhase regressions in the QMD wrapper.
+  nativeBuildInputs = lib.optional (qmdMemoryPackage != null) qmdMemoryPackage;
   env = {
     OPENCLAW_DEFAULT_INSTANCE = checkKey;
   };

@@ -185,6 +185,7 @@ let
             OPENCLAW_GATEWAY_PACKAGE = "${gatewayPackage}";
             OPENCLAW_GATEWAY_BIN = "${gatewayPackage}/bin/openclaw";
             OPENCLAW_QMD_PATH = qmdPath;
+            STDENV_SETUP = "${pkgs.stdenvNoCC}/setup";
             installPhase = "${../../../scripts/openclaw-qmd-wrapper-install.sh}";
           }
         else
