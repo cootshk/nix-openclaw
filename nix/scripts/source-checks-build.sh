@@ -88,13 +88,24 @@ fi
 
 log_step "patchShebangs node_modules/.bin" bash -e -c ". \"$STDENV_SETUP\"; patchShebangs node_modules/.bin"
 
+tsdown_max_old_space_mb="${OPENCLAW_NIX_TSDOWN_MAX_OLD_SPACE_MB:-}"
+if [ -z "$tsdown_max_old_space_mb" ]; then
+  case "$(uname -s)" in
+    Darwin) tsdown_max_old_space_mb=4096 ;;
+    *) tsdown_max_old_space_mb=8192 ;;
+  esac
+fi
+
 tsdown_node_options="${NODE_OPTIONS:-}"
 case "$tsdown_node_options" in
   *--max-old-space-size*) ;;
-  *) tsdown_node_options="${tsdown_node_options:+$tsdown_node_options }--max-old-space-size=${OPENCLAW_NIX_TSDOWN_MAX_OLD_SPACE_MB:-8192}" ;;
+  *) tsdown_node_options="${tsdown_node_options:+$tsdown_node_options }--max-old-space-size=$tsdown_max_old_space_mb" ;;
 esac
 
-log_step "node $tsdown_cli" env NODE_OPTIONS="$tsdown_node_options" node "$tsdown_cli" --config-loader unrun --logLevel warn
+log_step "node $tsdown_cli" env \
+  NODE_OPTIONS="$tsdown_node_options" \
+  OPENCLAW_RUN_NODE_SKIP_DTS_BUILD=1 \
+  node "$tsdown_cli" --config-loader unrun --logLevel warn
 log_step "node scripts/build-stamp.mjs" node scripts/build-stamp.mjs
 log_step "node $tsc_cli" node "$tsc_cli" -p tsconfig.plugin-sdk.dts.json
 log_step "node --import tsx scripts/write-plugin-sdk-entry-dts.ts" node --import tsx scripts/write-plugin-sdk-entry-dts.ts
