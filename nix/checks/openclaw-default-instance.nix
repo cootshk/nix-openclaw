@@ -670,7 +670,7 @@ let
   };
   runtimePluginUnsupportedCheck =
     requireAssertionFailure "unsupported runtimePlugins"
-      "Maintainers can inspect skipped-catalog diagnostics in nix/generated/openclaw-runtime-plugins/report.json"
+      "Maintainers can inspect unsupported-plugin diagnostics in nix/generated/openclaw-runtime-plugins/report.json"
       runtimePluginUnsupportedEval;
 
   runtimePluginRawLoadPathEval = moduleEval {
