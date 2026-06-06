@@ -35,7 +35,7 @@ jobs:
         uses: cachix/install-nix-action@v31
 
       - name: Run Linux CI aggregator
-        run: timeout --foreground 50m nix build .#checks.x86_64-linux.ci --accept-flake-config
+        run: timeout --foreground 50m scripts/ci-nix-build.sh linux-ci .#checks.x86_64-linux.ci --accept-flake-config
 
   macos:
     if: >-
@@ -55,7 +55,7 @@ jobs:
 
       - name: Build Darwin CI aggregator
         timeout-minutes: 25
-        run: nix build --accept-flake-config --option max-jobs 1 .#checks.aarch64-darwin.ci
+        run: scripts/ci-nix-build.sh darwin-ci --accept-flake-config --option max-jobs 1 .#checks.aarch64-darwin.ci
 
       - name: Run HM activation
         timeout-minutes: 10

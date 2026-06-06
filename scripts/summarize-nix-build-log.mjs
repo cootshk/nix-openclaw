@@ -1,0 +1,324 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+
+function usage() {
+  process.stderr.write(`Usage:
+  scripts/summarize-nix-build-log.mjs [--label <label>] [--seconds <seconds>] [--summary-file <path>] <log>
+  scripts/summarize-nix-build-log.mjs --github-log <log>
+`);
+}
+
+function parseArgs(argv) {
+  const args = {
+    githubLog: false,
+    label: "nix-build",
+    seconds: null,
+    summaryFile: process.env.GITHUB_STEP_SUMMARY || null,
+    logPath: null,
+  };
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--github-log") {
+      args.githubLog = true;
+    } else if (arg === "--label") {
+      args.label = requireValue(argv, ++i, arg);
+    } else if (arg === "--seconds") {
+      args.seconds = Number(requireValue(argv, ++i, arg));
+      if (!Number.isFinite(args.seconds) || args.seconds < 0) {
+        throw new Error("--seconds must be a non-negative number");
+      }
+    } else if (arg === "--summary-file") {
+      args.summaryFile = requireValue(argv, ++i, arg);
+    } else if (arg.startsWith("-")) {
+      throw new Error(`Unknown option: ${arg}`);
+    } else if (!args.logPath) {
+      args.logPath = arg;
+    } else {
+      throw new Error(`Unexpected argument: ${arg}`);
+    }
+  }
+
+  if (!args.logPath) {
+    throw new Error("Missing log path");
+  }
+  return args;
+}
+
+function requireValue(argv, index, flag) {
+  const value = argv[index];
+  if (!value) {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  return value;
+}
+
+function emptyGroup(label) {
+  return {
+    label,
+    firstTimestamp: null,
+    lastTimestamp: null,
+    elapsedSeconds: null,
+    buildPlanCount: 0,
+    fetchPlanCount: 0,
+    fetchDownloadBytes: 0,
+    fetchUnpackedBytes: 0,
+    copiedPathLines: 0,
+    copiedPaths: new Set(),
+    copySources: new Map(),
+    builtDrvLines: 0,
+    builtDrvs: new Set(),
+    builtNames: new Map(),
+    unpackedInputs: 0,
+    warningCount: 0,
+  };
+}
+
+function recordLine(group, rawLine) {
+  const { timestamp, message } = splitTimestamp(rawLine);
+  if (timestamp) {
+    group.firstTimestamp ||= timestamp;
+    group.lastTimestamp = timestamp;
+  }
+
+  const line = stripNixJsonPrefix(message);
+
+  const fetchPlan = line.match(
+    /these ([0-9]+) paths will be fetched \(([^,]+) download, ([^)]+) unpacked\)/,
+  );
+  if (fetchPlan) {
+    group.fetchPlanCount += Number(fetchPlan[1]);
+    group.fetchDownloadBytes += parseSize(fetchPlan[2]);
+    group.fetchUnpackedBytes += parseSize(fetchPlan[3]);
+  }
+
+  if (/^this derivation will be built:/.test(line)) {
+    group.buildPlanCount += 1;
+  }
+  const buildPlan = line.match(/^these ([0-9]+) derivations will be built:/);
+  if (buildPlan) {
+    group.buildPlanCount += Number(buildPlan[1]);
+  }
+
+  const copied = line.match(/copying path '([^']+)' from '([^']+)'/);
+  if (copied) {
+    group.copiedPathLines += 1;
+    group.copiedPaths.add(copied[1]);
+    group.copySources.set(copied[2], (group.copySources.get(copied[2]) || 0) + 1);
+  }
+
+  const built = line.match(/building '([^']+\.drv)'/);
+  if (built) {
+    group.builtDrvLines += 1;
+    group.builtDrvs.add(built[1]);
+    const name = drvName(built[1]);
+    group.builtNames.set(name, (group.builtNames.get(name) || 0) + 1);
+  }
+
+  if (/unpacking ['"][^'"]+['"] into the Git cache/.test(line)) {
+    group.unpackedInputs += 1;
+  }
+
+  if (/\bwarning:/.test(line)) {
+    group.warningCount += 1;
+  }
+}
+
+function splitTimestamp(line) {
+  const match = line.match(/^(20[0-9]{2}-[0-9]{2}-[0-9]{2}T[^ ]+Z) (.*)$/);
+  if (!match) {
+    return { timestamp: null, message: line };
+  }
+  return { timestamp: match[1], message: match[2] };
+}
+
+function stripNixJsonPrefix(line) {
+  if (!line.startsWith("@nix ")) {
+    return line;
+  }
+
+  try {
+    const event = JSON.parse(line.slice(5));
+    return event.text || event.msg || line;
+  } catch {
+    return line;
+  }
+}
+
+function parseSize(value) {
+  const match = value.trim().match(/^([0-9]+(?:\.[0-9]+)?)\s*([KMGT]i?B|B)$/i);
+  if (!match) {
+    return 0;
+  }
+
+  const unit = match[2].toLowerCase();
+  const multipliers = {
+    b: 1,
+    kb: 1000,
+    mb: 1000 ** 2,
+    gb: 1000 ** 3,
+    tb: 1000 ** 4,
+    kib: 1024,
+    mib: 1024 ** 2,
+    gib: 1024 ** 3,
+    tib: 1024 ** 4,
+  };
+  return Number(match[1]) * (multipliers[unit] || 0);
+}
+
+function drvName(path) {
+  return path
+    .replace(/^.*\//, "")
+    .replace(/\.drv$/, "")
+    .replace(/^[0-9a-z]{32}-/, "");
+}
+
+function parseRawLog(label, seconds, text) {
+  const group = emptyGroup(label);
+  group.elapsedSeconds = seconds;
+  for (const line of text.split(/\r?\n/)) {
+    recordLine(group, line);
+  }
+  return [group];
+}
+
+function parseGithubLog(text) {
+  const groups = new Map();
+  for (const line of text.split(/\r?\n/)) {
+    const parts = line.split("\t");
+    if (parts.length < 3) {
+      continue;
+    }
+    const [job, step, ...rest] = parts;
+    const key = `${job}\t${step}`;
+    if (!groups.has(key)) {
+      groups.set(key, emptyGroup(`${job} / ${step}`));
+    }
+    recordLine(groups.get(key), rest.join("\t"));
+  }
+  return [...groups.values()].filter(hasSignal);
+}
+
+function hasSignal(group) {
+  return (
+    group.fetchPlanCount > 0 ||
+    group.copiedPathLines > 0 ||
+    group.builtDrvLines > 0 ||
+    group.unpackedInputs > 0 ||
+    group.warningCount > 0
+  );
+}
+
+function finishGroup(group) {
+  if (group.elapsedSeconds === null && group.firstTimestamp && group.lastTimestamp) {
+    group.elapsedSeconds =
+      (Date.parse(group.lastTimestamp) - Date.parse(group.firstTimestamp)) / 1000;
+  }
+  return group;
+}
+
+function render(groups, title) {
+  const finished = groups.map(finishGroup);
+  const lines = [`### ${title}`, ""];
+
+  lines.push(
+    "| Step | Seconds | Fetch plan | Planned builds | Copied paths | Built drvs | Input fetches | Warnings |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+  );
+  for (const group of finished) {
+    lines.push(
+      [
+        markdownCell(group.label),
+        formatSeconds(group.elapsedSeconds),
+        formatFetchPlan(group),
+        group.buildPlanCount === 0 ? "-" : String(group.buildPlanCount),
+        `${group.copiedPaths.size} unique / ${group.copiedPathLines} lines`,
+        `${group.builtDrvs.size} unique / ${group.builtDrvLines} lines`,
+        String(group.unpackedInputs),
+        String(group.warningCount),
+      ].join(" | ").replace(/^/, "| ").replace(/$/, " |"),
+    );
+  }
+
+  const details = finished.filter(
+    (group) => group.builtNames.size > 0 || group.copySources.size > 0,
+  );
+  for (const group of details) {
+    lines.push("", `#### ${group.label}`, "");
+    if (group.copySources.size > 0) {
+      lines.push(`Copy sources: ${formatTopMap(group.copySources, 4)}`);
+    }
+    if (group.builtNames.size > 0) {
+      lines.push(`Built derivations: ${formatTopMap(group.builtNames, 20)}`);
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function markdownCell(value) {
+  return value.replace(/\|/g, "\\|");
+}
+
+function formatSeconds(seconds) {
+  if (seconds === null || !Number.isFinite(seconds)) {
+    return "-";
+  }
+  return seconds.toFixed(seconds >= 10 ? 0 : 2);
+}
+
+function formatFetchPlan(group) {
+  if (group.fetchPlanCount === 0) {
+    return "-";
+  }
+  return `${group.fetchPlanCount} paths, ${formatBytes(group.fetchDownloadBytes)} download, ${formatBytes(
+    group.fetchUnpackedBytes,
+  )} unpacked`;
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "unknown";
+  }
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
+
+function formatTopMap(map, limit) {
+  const entries = [...map.entries()].sort((left, right) => {
+    return right[1] - left[1] || left[0].localeCompare(right[0]);
+  });
+  const shown = entries.slice(0, limit).map(([name, count]) => `${name} (${count})`);
+  const hidden = entries.length - shown.length;
+  if (hidden > 0) {
+    shown.push(`and ${hidden} more`);
+  }
+  return shown.join(", ");
+}
+
+try {
+  const args = parseArgs(process.argv.slice(2));
+  const text = fs.readFileSync(args.logPath, "utf8");
+  const groups = args.githubLog
+    ? parseGithubLog(text)
+    : parseRawLog(args.label, args.seconds, text);
+  const markdown = render(
+    groups,
+    args.githubLog ? "Nix CI Log Summary" : `Nix Build Meter: ${args.label}`,
+  );
+
+  process.stdout.write(markdown);
+  if (args.summaryFile) {
+    fs.appendFileSync(args.summaryFile, `\n${markdown}`);
+  }
+} catch (error) {
+  usage();
+  process.stderr.write(`${error.message}\n`);
+  process.exit(1);
+}
