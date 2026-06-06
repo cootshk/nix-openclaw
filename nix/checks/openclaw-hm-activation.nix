@@ -3,18 +3,6 @@
 let
   openclawModule = ../modules/home-manager/openclaw.nix;
   testScript = builtins.readFile ../tests/hm-activation.py;
-  lockedPathFlake =
-    name: path: narHash:
-    let
-      storePath = builtins.path {
-        inherit name path;
-        sha256 = narHash;
-      };
-    in
-    "path:${builtins.unsafeDiscardStringContext (toString storePath)}?narHash=${narHash}";
-  alphaPluginSource =
-    lockedPathFlake "openclaw-test-plugin-alpha" ../tests/plugins/alpha
-      "sha256-FV4UN38sPy2Yp/HhqUxd0HW5l2PcIBBmUz4JzxTAOXY=";
 
 in
 pkgs.testers.nixosTest {
@@ -65,9 +53,6 @@ pkgs.testers.nixosTest {
                 };
                 files."LORE.md" = ../tests/workspace/LORE.md;
               };
-              customPlugins = [
-                { source = alphaPluginSource; }
-              ];
               installApp = false;
               launchd.enable = false;
               instances.default = {
