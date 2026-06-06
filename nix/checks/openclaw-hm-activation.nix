@@ -97,6 +97,7 @@ pkgs.testers.nixosTest {
                 "OPENCLAW_SKIP_CHANNELS=1"
                 "OPENCLAW_SKIP_CRON=1"
                 "OPENCLAW_SKIP_GMAIL_WATCHER=1"
+                "OPENCLAW_GATEWAY_STARTUP_TRACE=1"
                 "OPENCLAW_DISABLE_BONJOUR=1"
                 "NODE_OPTIONS=--report-on-fatalerror"
                 "NODE_REPORT_DIRECTORY=/tmp/openclaw"

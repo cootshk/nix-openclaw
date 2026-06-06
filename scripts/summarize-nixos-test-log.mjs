@@ -52,6 +52,7 @@ function requireValue(argv, index, flag) {
 function parseLog(text) {
   const finished = [];
   const gatewayEvents = [];
+  const startupTrace = [];
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = stripAnsi(rawLine);
@@ -68,19 +69,55 @@ function parseLog(text) {
     if (gatewayMatch && /\b(ready|http server listening|starting HTTP server|loading configuration)\b/.test(gatewayMatch[1])) {
       gatewayEvents.push(gatewayMatch[1]);
     }
+
+    if (gatewayMatch) {
+      const startupTraceEntry = parseStartupTrace(gatewayMatch[1]);
+      if (startupTraceEntry) {
+        startupTrace.push(startupTraceEntry);
+      }
+    }
   }
 
-  return { finished, gatewayEvents };
+  return { finished, gatewayEvents, startupTrace };
 }
 
 function stripAnsi(value) {
   return value.replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "");
 }
 
-function render({ label, limit, finished, gatewayEvents }) {
+function parseStartupTrace(message) {
+  const prefix = "startup trace: ";
+  if (!message.startsWith(prefix)) {
+    return null;
+  }
+
+  const body = message.slice(prefix.length);
+  const span = body.match(/^([^ ]+) ([0-9]+(?:\.[0-9]+)?)ms(?: total=([0-9]+(?:\.[0-9]+)?)ms)?(?: (.*))?$/);
+  if (span) {
+    return {
+      name: span[1],
+      durationMs: Number(span[2]),
+      totalMs: span[3] ? Number(span[3]) : null,
+      metrics: span[4] || "",
+    };
+  }
+
+  const detail = body.match(/^([^ ]+)(?: (.*))?$/);
+  if (!detail) {
+    return null;
+  }
+  return {
+    name: detail[1],
+    durationMs: null,
+    totalMs: null,
+    metrics: detail[2] || "",
+  };
+}
+
+function render({ label, limit, finished, gatewayEvents, startupTrace }) {
   const lines = [`### NixOS Test Timing: ${label}`, ""];
 
-  if (finished.length === 0 && gatewayEvents.length === 0) {
+  if (finished.length === 0 && gatewayEvents.length === 0 && startupTrace.length === 0) {
     lines.push("No NixOS test timing lines found.");
     return `${lines.join("\n")}\n`;
   }
@@ -112,6 +149,30 @@ function render({ label, limit, finished, gatewayEvents }) {
     }
   }
 
+  if (startupTrace.length > 0) {
+    const startupSpans = startupTrace
+      .filter((entry) => entry.durationMs !== null)
+      .sort((left, right) => right.durationMs - left.durationMs || left.name.localeCompare(right.name))
+      .slice(0, Math.min(5, limit));
+
+    if (startupSpans.length > 0) {
+      lines.push("");
+      lines.push(
+        `Slowest gateway startup spans: ${startupSpans.map((entry) => `${entry.name} ${formatMilliseconds(entry.durationMs)}ms`).join(", ")}.`,
+      );
+    }
+    lines.push("", "Gateway startup trace:");
+    lines.push("| Event | Duration ms | Total ms | Metrics |", "| --- | ---: | ---: | --- |");
+    for (const event of startupTrace.slice(0, limit)) {
+      lines.push(
+        `| ${markdownCell(event.name)} | ${formatMilliseconds(event.durationMs)} | ${formatMilliseconds(event.totalMs)} | ${markdownCell(event.metrics || "-")} |`,
+      );
+    }
+    if (startupTrace.length > limit) {
+      lines.push(`| ${formatCount(startupTrace.length - limit)} more | - | - | - |`);
+    }
+  }
+
   return `${lines.join("\n")}\n`;
 }
 
@@ -120,6 +181,13 @@ function markdownCell(value) {
 }
 
 function formatSeconds(value) {
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+  return value.toFixed(value >= 10 ? 1 : 2);
+}
+
+function formatMilliseconds(value) {
   if (!Number.isFinite(value)) {
     return "-";
   }
