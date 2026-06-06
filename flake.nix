@@ -45,7 +45,6 @@
           qmdPkgs = qmdPkgsFor prev.stdenv.hostPlatform.system;
         } final prev;
       sourceInfoStable = import ./nix/sources/openclaw-source.nix;
-      sourceInfoDogfood = import ./nix/sources/openclaw-dogfood-source.nix;
       systems = [
         "x86_64-linux"
         "aarch64-darwin"
@@ -71,12 +70,6 @@
           openclawToolPkgs = openclawToolPkgs;
           inherit qmdPackage;
         };
-        packageSetDogfood = import ./nix/packages {
-          pkgs = pkgs;
-          sourceInfo = sourceInfoDogfood;
-          openclawToolPkgs = openclawToolPkgs;
-          inherit qmdPackage;
-        };
         runtimePluginPackageOutputs = pkgs.lib.mapAttrs' (
           id: package: pkgs.lib.nameValuePair "openclaw-runtime-plugin-${id}" package
         ) packageSetStable.openclawRuntimePlugins;
@@ -92,8 +85,6 @@
           (builtins.removeAttrs packageSetStable [ "openclawRuntimePlugins" ])
           // {
             default = packageSetStable.openclaw;
-            openclaw-dogfood = packageSetDogfood.openclaw;
-            openclaw-gateway-dogfood = packageSetDogfood.openclaw-gateway;
           }
           // runtimePluginPackageOutputs;
 
@@ -113,6 +104,9 @@
               };
               default-instance = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix {
                 includeQmdChecks = false;
+              };
+              source-override-render = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix {
+                includeSourceOverrideChecks = true;
               };
               workspace-materializer = pkgs.callPackage ./nix/checks/openclaw-workspace-materializer.nix { };
               config-validity = pkgs.callPackage ./nix/checks/openclaw-config-validity.nix {
@@ -136,12 +130,6 @@
             pluginChecks = {
               plugin-instance = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix {
                 includePluginChecks = true;
-              };
-            };
-            dogfoodChecks = {
-              package-contents-dogfood = pkgs.callPackage ./nix/checks/openclaw-package-contents.nix {
-                openclawGateway = packageSetDogfood.openclaw-gateway;
-                requireAgentWorkspaceTemplates = false;
               };
             };
             runtimePluginChecks = {
@@ -174,30 +162,74 @@
                   ];
                 }).activationPackage;
             };
-            ciChecks = builtins.removeAttrs stableChecks [ "gateway" ];
+            packageArtifactPaths =
+              [
+                packageSetStable.openclaw
+                packageSetStable.openclaw-gateway
+                stableChecks.bin-surface
+                stableChecks.package-contents
+              ]
+              ++ pkgs.lib.optionals (packageSetStable ? openclaw-app && packageSetStable.openclaw-app != null) [
+                packageSetStable.openclaw-app
+              ];
+            proofChecks = {
+              # Product artifacts: user-facing package plus component packages
+              # and content/surface checks that prove those artifacts are sane.
+              package-artifacts = pkgs.symlinkJoin {
+                name = "openclaw-package-artifacts";
+                paths = packageArtifactPaths;
+              };
+              # Module render: pure Home Manager/module materialization checks.
+              module-render = pkgs.symlinkJoin {
+                name = "openclaw-module-render";
+                paths = [
+                  stableChecks.default-instance
+                  stableChecks.source-override-render
+                  stableChecks.workspace-materializer
+                ];
+              };
+              # Runtime smoke: gateway/config checks for the default runtime path.
+              runtime-smoke = pkgs.symlinkJoin {
+                name = "openclaw-runtime-smoke";
+                paths = [
+                  stableChecks.config-validity
+                  stableChecks.gateway-smoke
+                ];
+              };
+              # Runtime plugin host contract: lock consistency plus module/config
+              # and gateway behavior when packaged plugin roots are enabled.
+              runtime-plugin-host = pkgs.symlinkJoin {
+                name = "openclaw-runtime-plugin-host";
+                paths = [
+                  runtimePluginChecks.runtime-plugin-locks
+                  pluginChecks.plugin-instance
+                  runtimePluginChecks.runtime-plugin-config-validity
+                  runtimePluginChecks.runtime-plugin-gateway-smoke
+                ];
+              };
+              # QMD opt-in: local memory backend only when users enable it.
+              qmd-opt-in = pkgs.symlinkJoin {
+                name = "openclaw-qmd-opt-in";
+                paths = [
+                  qmdChecks.qmd-instance
+                  qmdChecks.qmd-runtime
+                ];
+              };
+            }
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              platform-activation = linuxOnlyChecks.hm-activation;
+            }
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+              platform-activation = darwinOnlyChecks.hm-activation-macos-package;
+            };
           in
           stableChecks
           // qmdChecks
           // pluginChecks
           // runtimePluginChecks
-          // dogfoodChecks
           // linuxOnlyChecks
           // darwinOnlyChecks
-          // {
-            # CI aggregator: prove the default package/config/apply path without
-            # rebuilding optional opt-in surfaces on every push. Exhaustive
-            # runtime plugin catalog/smoke/package checks and QMD runtime proof remain
-            # available as explicit checks.
-            ci = pkgs.symlinkJoin {
-              name = "nix-openclaw-ci";
-              paths = [
-                packageSetStable.openclaw
-              ]
-              ++ (builtins.attrValues ciChecks)
-              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (builtins.attrValues linuxOnlyChecks)
-              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin (builtins.attrValues darwinOnlyChecks);
-            };
-          };
+          // proofChecks;
 
         devShells.default = pkgs.mkShell {
           packages = [

@@ -105,7 +105,8 @@ let
     let
       gatewayPackage =
         if inst.gatewayPath != null then
-          pkgs.callPackage ../../packages/openclaw-gateway.nix {
+          pkgs.callPackage ../../../packages/openclaw-gateway.nix {
+            sourceInfo = import ../../../sources/openclaw-source.nix;
             gatewaySrc = builtins.path {
               path = inst.gatewayPath;
               name = "openclaw-gateway-src";

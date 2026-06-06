@@ -111,22 +111,31 @@ jobs:
         continue-on-error: true
         run: scripts/check-flake-lock-owners.sh
 
-      - name: Run Linux CI aggregator
-        id: ci
+      - name: Validate Linux supported surface
+        id: supported_surface
         if: steps.materialize.outcome == 'success' && steps.owners.outcome == 'success'
         continue-on-error: true
-        run: timeout --foreground 50m maintainers/scripts/ci-nix-build.sh linux-ci .#checks.x86_64-linux.ci --accept-flake-config
+        run: |
+          timeout --foreground 50m maintainers/scripts/ci-nix-build.sh linux-supported-surface \
+            .#checks.x86_64-linux.package-artifacts \
+            .#checks.x86_64-linux.module-render \
+            .#checks.x86_64-linux.runtime-smoke \
+            .#checks.x86_64-linux.platform-activation \
+            .#checks.x86_64-linux.runtime-plugin-packages \
+            .#checks.x86_64-linux.runtime-plugin-host \
+            .#checks.x86_64-linux.qmd-opt-in \
+            --accept-flake-config
 
       - name: Summarize Linux HM activation timing
-        if: steps.ci.outcome == 'success'
-        run: maintainers/scripts/summarize-hm-activation-timing.sh x86_64-linux linux-hm-activation
+        if: steps.supported_surface.outcome == 'success'
+        run: maintainers/scripts/summarize-hm-activation-timing.sh x86_64-linux linux-supported-surface
 
       - name: Record validation result
         id: validation
         if: always()
         run: |
           set -euo pipefail
-          if [[ "${{ steps.materialize.outcome }}" == "success" && "${{ steps.owners.outcome }}" == "success" && "${{ steps.ci.outcome }}" == "success" ]]; then
+          if [[ "${{ steps.materialize.outcome }}" == "success" && "${{ steps.owners.outcome }}" == "success" && "${{ steps.supported_surface.outcome }}" == "success" ]]; then
             echo "validation_ok=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -137,7 +146,7 @@ jobs:
             echo
             echo "- Materialize: \`${{ steps.materialize.outcome }}\`"
             echo "- flake.lock owners: \`${{ steps.owners.outcome }}\`"
-            echo "- CI aggregator: \`${{ steps.ci.outcome }}\`"
+            echo "- Supported surface: \`${{ steps.supported_surface.outcome }}\`"
             echo
             echo "Promotion skipped; pinned source remains unchanged."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -146,7 +155,7 @@ jobs:
     needs: select
     if: needs.select.outputs.has_update == 'true'
     runs-on: macos-14
-    timeout-minutes: 40
+    timeout-minutes: 60
     outputs:
       materialization_digest: ${{ steps.materialization.outputs.materialization_digest }}
       validation_ok: ${{ steps.validation.outputs.validation_ok }}
@@ -185,26 +194,42 @@ jobs:
           )"
           echo "materialization_digest=${digest}" >> "$GITHUB_OUTPUT"
 
-      - name: Build Darwin CI aggregator
-        id: ci
+      - name: Validate macOS supported surface
+        id: supported_surface
         if: steps.materialize.outcome == 'success'
         continue-on-error: true
-        timeout-minutes: 25
-        run: maintainers/scripts/ci-nix-build.sh darwin-ci --accept-flake-config --option max-jobs 2 .#checks.aarch64-darwin.ci
+        timeout-minutes: 45
+        run: |
+          maintainers/scripts/ci-nix-build.sh macos-supported-surface \
+            --accept-flake-config \
+            --option max-jobs 2 \
+            .#checks.aarch64-darwin.package-artifacts \
+            .#checks.aarch64-darwin.module-render \
+            .#checks.aarch64-darwin.runtime-smoke \
+            .#checks.aarch64-darwin.platform-activation \
+            .#checks.aarch64-darwin.runtime-plugin-packages \
+            .#checks.aarch64-darwin.runtime-plugin-host \
+            .#checks.aarch64-darwin.qmd-opt-in
 
       - name: Run HM activation
         id: hm
-        if: steps.materialize.outcome == 'success' && steps.ci.outcome == 'success'
+        if: steps.materialize.outcome == 'success' && steps.supported_surface.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 10
-        run: OPENCLAW_HM_ACTIVATION_PACKAGE="$PWD/result" scripts/hm-activation-macos.sh
+        run: |
+          nix build \
+            --accept-flake-config \
+            --option max-jobs 2 \
+            --out-link result-platform-activation \
+            .#checks.aarch64-darwin.platform-activation
+          OPENCLAW_HM_ACTIVATION_PACKAGE="$PWD/result-platform-activation" scripts/hm-activation-macos.sh
 
       - name: Record validation result
         id: validation
         if: always()
         run: |
           set -euo pipefail
-          if [[ "${{ steps.materialize.outcome }}" == "success" && "${{ steps.ci.outcome }}" == "success" && "${{ steps.hm.outcome }}" == "success" ]]; then
+          if [[ "${{ steps.materialize.outcome }}" == "success" && "${{ steps.supported_surface.outcome }}" == "success" && "${{ steps.hm.outcome }}" == "success" ]]; then
             echo "validation_ok=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -214,7 +239,7 @@ jobs:
             echo "### macOS validation did not pass"
             echo
             echo "- Materialize: \`${{ steps.materialize.outcome }}\`"
-            echo "- CI aggregator: \`${{ steps.ci.outcome }}\`"
+            echo "- Supported surface: \`${{ steps.supported_surface.outcome }}\`"
             echo "- HM activation: \`${{ steps.hm.outcome }}\`"
             echo
             echo "Promotion skipped; pinned source remains unchanged."
@@ -308,8 +333,8 @@ jobs:
           - keep the npm-shrinkwrapped OpenClaw gateway current without blocking on public macOS app asset lag
 
           Tests:
-          - nix build .#checks.x86_64-linux.ci --accept-flake-config
-          - nix build --accept-flake-config --option max-jobs 2 .#checks.aarch64-darwin.ci
+          - nix build .#checks.x86_64-linux.package-artifacts .#checks.x86_64-linux.module-render .#checks.x86_64-linux.runtime-smoke .#checks.x86_64-linux.platform-activation .#checks.x86_64-linux.runtime-plugin-packages .#checks.x86_64-linux.runtime-plugin-host .#checks.x86_64-linux.qmd-opt-in --accept-flake-config
+          - nix build --accept-flake-config --option max-jobs 2 .#checks.aarch64-darwin.package-artifacts .#checks.aarch64-darwin.module-render .#checks.aarch64-darwin.runtime-smoke .#checks.aarch64-darwin.platform-activation .#checks.aarch64-darwin.runtime-plugin-packages .#checks.aarch64-darwin.runtime-plugin-host .#checks.aarch64-darwin.qmd-opt-in
           - scripts/hm-activation-macos.sh
           EOF
 

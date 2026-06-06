@@ -1,9 +1,8 @@
 builds:
   include:
-    # CI aggregators prove package contracts. GitHub Actions owns the Linux
-    # aggregate; Garnix keeps Linux cache targets explicit instead of expanding
-    # every generated runtime plugin package.
-    - "checks.aarch64-darwin.ci"
+    # Garnix is cache publication only; GitHub Actions owns product proof.
+    # Keep this small because Garnix is not the durable CI architecture.
+    - "checks.aarch64-darwin.package-artifacts"
     # User-facing/component packages must also be top-level Garnix artifacts,
     # otherwise downstream machines can see green CI but miss the binary cache.
     - "packages.aarch64-darwin.openclaw"

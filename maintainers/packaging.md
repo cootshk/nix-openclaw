@@ -7,12 +7,12 @@ This repo ships a working Nix package for OpenClaw users, not just a pin mirror.
 - The user-facing package is `openclaw`.
 - `openclaw-gateway` is the runnable gateway for Linux and macOS. Stable pins
   use upstream's npm package/shrinkwrap by default; source builds remain for
-  dogfood and explicit source overrides.
+  explicit source overrides.
 - `openclaw-app` is the Darwin-only desktop app from upstream's public app artifact.
 - Component outputs exist for modules, checks, and debugging. They are not separate product tracks.
-- `openclaw-dogfood` and `openclaw-gateway-dogfood` are temporary maintainer
-  artifacts for testing a specific upstream commit before the next stable
-  release. They must not become the documented consumer default.
+- Do not add dogfood package tracks. If maintainers need to test an unreleased
+  upstream source, use an explicit source override instead of adding another
+  public flake output.
 - Do not split the repo into separate desktop and server tracks.
 
 ## Nix Ownership
