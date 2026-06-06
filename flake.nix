@@ -45,7 +45,6 @@
           qmdPkgs = qmdPkgsFor prev.stdenv.hostPlatform.system;
         } final prev;
       sourceInfoStable = import ./nix/sources/openclaw-source.nix;
-      sourceInfoDogfood = import ./nix/sources/openclaw-dogfood-source.nix;
       systems = [
         "x86_64-linux"
         "aarch64-darwin"
@@ -71,12 +70,6 @@
           openclawToolPkgs = openclawToolPkgs;
           inherit qmdPackage;
         };
-        packageSetDogfood = import ./nix/packages {
-          pkgs = pkgs;
-          sourceInfo = sourceInfoDogfood;
-          openclawToolPkgs = openclawToolPkgs;
-          inherit qmdPackage;
-        };
         runtimePluginPackageOutputs = pkgs.lib.mapAttrs' (
           id: package: pkgs.lib.nameValuePair "openclaw-runtime-plugin-${id}" package
         ) packageSetStable.openclawRuntimePlugins;
@@ -92,8 +85,6 @@
           (builtins.removeAttrs packageSetStable [ "openclawRuntimePlugins" ])
           // {
             default = packageSetStable.openclaw;
-            openclaw-dogfood = packageSetDogfood.openclaw;
-            openclaw-gateway-dogfood = packageSetDogfood.openclaw-gateway;
           }
           // runtimePluginPackageOutputs;
 
@@ -103,7 +94,7 @@
 
         checks =
           let
-            baseChecks = {
+            stableChecks = {
               gateway = packageSetStable.openclaw-gateway;
               bin-surface = pkgs.callPackage ./nix/checks/openclaw-bin-surface.nix {
                 openclawPackage = packageSetStable.openclaw;
@@ -111,59 +102,134 @@
               package-contents = pkgs.callPackage ./nix/checks/openclaw-package-contents.nix {
                 openclawGateway = packageSetStable.openclaw-gateway;
               };
-              package-contents-dogfood = pkgs.callPackage ./nix/checks/openclaw-package-contents.nix {
-                openclawGateway = packageSetDogfood.openclaw-gateway;
-                requireAgentWorkspaceTemplates = false;
+              default-instance = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix {
+                includeQmdChecks = false;
               };
-              default-instance = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix { };
-              runtime-plugin-locks = pkgs.callPackage ./nix/checks/openclaw-runtime-plugin-locks.nix { };
+              source-override-render = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix {
+                includeSourceOverrideChecks = true;
+              };
               workspace-materializer = pkgs.callPackage ./nix/checks/openclaw-workspace-materializer.nix { };
               config-validity = pkgs.callPackage ./nix/checks/openclaw-config-validity.nix {
                 openclawGateway = packageSetStable.openclaw-gateway;
+                includeRuntimePluginSmoke = false;
               };
               gateway-smoke = pkgs.callPackage ./nix/checks/openclaw-gateway-smoke.nix {
                 openclawGateway = packageSetStable.openclaw-gateway;
+                includeRuntimePluginSmoke = false;
               };
-            }
-            // pkgs.lib.optionalAttrs (qmdPackage != null) {
+            };
+            qmdChecks = {
+              qmd-instance = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix {
+                includeQmdChecks = true;
+              };
               qmd-runtime = pkgs.callPackage ./nix/checks/openclaw-qmd-runtime.nix {
                 openclawPackage = packageSetStable.openclaw;
                 inherit qmdPackage;
               };
-            }
-            // (
-              if pkgs.stdenv.hostPlatform.isLinux then
-                let
-                  sourceChecks = pkgs.callPackage ./nix/checks/openclaw-source-checks.nix {
-                    sourceInfo = sourceInfoStable;
-                    openclawGateway = packageSetStable.openclaw-gateway;
-                  };
-                in
-                {
-                  config-options = sourceChecks;
-                  source-checks = sourceChecks;
-                  hm-activation = import ./nix/checks/openclaw-hm-activation.nix {
-                    inherit pkgs home-manager;
-                  };
-                }
-              else
-                { }
-            );
-          in
-          baseChecks
-          // {
-            # CI aggregator: build the expensive gateway once, then run all checks in the
-            # same build machine/store to avoid cache-miss races between parallel jobs.
-            ci = pkgs.symlinkJoin {
-              name = "nix-openclaw-ci";
-              paths = [
+            };
+            pluginChecks = {
+              plugin-instance = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix {
+                includePluginChecks = true;
+              };
+            };
+            runtimePluginChecks = {
+              runtime-plugin-config-validity = pkgs.callPackage ./nix/checks/openclaw-config-validity.nix {
+                openclawGateway = packageSetStable.openclaw-gateway;
+                includeRuntimePluginSmoke = true;
+              };
+              runtime-plugin-gateway-smoke = pkgs.callPackage ./nix/checks/openclaw-gateway-smoke.nix {
+                openclawGateway = packageSetStable.openclaw-gateway;
+                includeRuntimePluginSmoke = true;
+              };
+              runtime-plugin-locks = pkgs.callPackage ./nix/checks/openclaw-runtime-plugin-locks.nix { };
+              runtime-plugin-packages = pkgs.symlinkJoin {
+                name = "openclaw-runtime-plugin-packages";
+                paths = builtins.attrValues packageSetStable.openclawRuntimePlugins;
+              };
+            };
+            linuxOnlyChecks = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              hm-activation = import ./nix/checks/openclaw-hm-activation.nix {
+                inherit pkgs home-manager;
+              };
+            };
+            darwinOnlyChecks = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+              hm-activation-macos-package =
+                (home-manager.lib.homeManagerConfiguration {
+                  inherit pkgs;
+                  modules = [
+                    self.homeManagerModules.openclaw
+                    ./nix/tests/hm-activation-macos/home.nix
+                  ];
+                }).activationPackage;
+            };
+            packageArtifactPaths =
+              [
                 packageSetStable.openclaw
                 packageSetStable.openclaw-gateway
+                stableChecks.bin-surface
+                stableChecks.package-contents
               ]
-              ++ (builtins.attrValues packageSetStable.openclawRuntimePlugins)
-              ++ (builtins.attrValues baseChecks);
+              ++ pkgs.lib.optionals (packageSetStable ? openclaw-app && packageSetStable.openclaw-app != null) [
+                packageSetStable.openclaw-app
+              ];
+            proofChecks = {
+              # Product artifacts: user-facing package plus component packages
+              # and content/surface checks that prove those artifacts are sane.
+              package-artifacts = pkgs.symlinkJoin {
+                name = "openclaw-package-artifacts";
+                paths = packageArtifactPaths;
+              };
+              # Module render: pure Home Manager/module materialization checks.
+              module-render = pkgs.symlinkJoin {
+                name = "openclaw-module-render";
+                paths = [
+                  stableChecks.default-instance
+                  stableChecks.source-override-render
+                  stableChecks.workspace-materializer
+                ];
+              };
+              # Runtime smoke: gateway/config checks for the default runtime path.
+              runtime-smoke = pkgs.symlinkJoin {
+                name = "openclaw-runtime-smoke";
+                paths = [
+                  stableChecks.config-validity
+                  stableChecks.gateway-smoke
+                ];
+              };
+              # Runtime plugin host contract: lock consistency plus module/config
+              # and gateway behavior when packaged plugin roots are enabled.
+              runtime-plugin-host = pkgs.symlinkJoin {
+                name = "openclaw-runtime-plugin-host";
+                paths = [
+                  runtimePluginChecks.runtime-plugin-locks
+                  pluginChecks.plugin-instance
+                  runtimePluginChecks.runtime-plugin-config-validity
+                  runtimePluginChecks.runtime-plugin-gateway-smoke
+                ];
+              };
+              # QMD opt-in: local memory backend only when users enable it.
+              qmd-opt-in = pkgs.symlinkJoin {
+                name = "openclaw-qmd-opt-in";
+                paths = [
+                  qmdChecks.qmd-instance
+                  qmdChecks.qmd-runtime
+                ];
+              };
+            }
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              platform-activation = linuxOnlyChecks.hm-activation;
+            }
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+              platform-activation = darwinOnlyChecks.hm-activation-macos-package;
             };
-          };
+          in
+          stableChecks
+          // qmdChecks
+          // pluginChecks
+          // runtimePluginChecks
+          // linuxOnlyChecks
+          // darwinOnlyChecks
+          // proofChecks;
 
         devShells.default = pkgs.mkShell {
           packages = [

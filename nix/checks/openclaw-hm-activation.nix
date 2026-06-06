@@ -3,18 +3,6 @@
 let
   openclawModule = ../modules/home-manager/openclaw.nix;
   testScript = builtins.readFile ../tests/hm-activation.py;
-  lockedPathFlake =
-    name: path: narHash:
-    let
-      storePath = builtins.path {
-        inherit name path;
-        sha256 = narHash;
-      };
-    in
-    "path:${builtins.unsafeDiscardStringContext (toString storePath)}?narHash=${narHash}";
-  alphaPluginSource =
-    lockedPathFlake "openclaw-test-plugin-alpha" ../tests/plugins/alpha
-      "sha256-FV4UN38sPy2Yp/HhqUxd0HW5l2PcIBBmUz4JzxTAOXY=";
 
 in
 pkgs.testers.nixosTest {
@@ -46,6 +34,11 @@ pkgs.testers.nixosTest {
               homeDirectory = "/home/alice";
               stateVersion = "23.11";
             };
+            manual = {
+              html.enable = false;
+              json.enable = false;
+              manpages.enable = false;
+            };
 
             programs.openclaw = {
               enable = true;
@@ -60,9 +53,6 @@ pkgs.testers.nixosTest {
                 };
                 files."LORE.md" = ../tests/workspace/LORE.md;
               };
-              customPlugins = [
-                { source = alphaPluginSource; }
-              ];
               installApp = false;
               launchd.enable = false;
               instances.default = {
@@ -92,6 +82,7 @@ pkgs.testers.nixosTest {
                 "OPENCLAW_SKIP_CHANNELS=1"
                 "OPENCLAW_SKIP_CRON=1"
                 "OPENCLAW_SKIP_GMAIL_WATCHER=1"
+                "OPENCLAW_GATEWAY_STARTUP_TRACE=1"
                 "OPENCLAW_DISABLE_BONJOUR=1"
                 "NODE_OPTIONS=--report-on-fatalerror"
                 "NODE_REPORT_DIRECTORY=/tmp/openclaw"

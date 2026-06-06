@@ -32,12 +32,12 @@ require_path "${root}/docs/reference/templates"
 require_path "${root}/docs/reference/templates/AGENTS.md"
 require_path "${root}/docs/reference/templates/SOUL.md"
 require_path "${root}/docs/reference/templates/TOOLS.md"
-if [ "${OPENCLAW_REQUIRE_AGENT_WORKSPACE_TEMPLATES:-1}" = "1" ]; then
-  require_path "${root}/src/agents/templates/HEARTBEAT.md"
-fi
+require_path "${root}/src/agents/templates/HEARTBEAT.md"
 require_path "${root}/skills"
-require_path "${root}/node_modules/hasown"
-require_path "${root}/node_modules/combined-stream"
+if find "${root}/node_modules" -path "*/form-data/package.json" -type f -print | grep -q .; then
+  require_path "${root}/node_modules/hasown"
+  require_path "${root}/node_modules/combined-stream"
+fi
 
 public_surface_loader="$(
   find "${root}/dist" -name "*.js" -type f -exec grep -sl "function loadBundledPluginPublicArtifactModuleSync" {} + | head -1
@@ -50,6 +50,7 @@ if grep -q "rejectHardlinks: true" "$public_surface_loader"; then
   echo "Bundled plugin public surface loader still rejects hardlinked package files" >&2
   exit 1
 fi
+
 export PUBLIC_SURFACE_LOADER="$public_surface_loader"
 node --input-type=module <<'NODE'
 import { pathToFileURL } from "node:url";

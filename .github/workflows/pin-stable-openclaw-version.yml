@@ -94,11 +94,12 @@ jobs:
         if: steps.materialize.outcome == 'success'
         run: |
           set -euo pipefail
+          pin_files=()
+          while IFS= read -r file; do
+            pin_files+=("$file")
+          done < <(scripts/update-pins.sh files)
           digest="$(
-            git diff --binary -- \
-              nix/sources/openclaw-source.nix \
-              nix/packages/openclaw-app.nix \
-              nix/generated/openclaw-config-options.nix \
+            git diff --binary -- "${pin_files[@]}" \
               | shasum -a 256 \
               | awk '{ print $1 }'
           )"
@@ -110,24 +111,31 @@ jobs:
         continue-on-error: true
         run: scripts/check-flake-lock-owners.sh
 
-      - name: Run Linux CI aggregator
-        id: ci
+      - name: Validate Linux supported surface
+        id: supported_surface
         if: steps.materialize.outcome == 'success' && steps.owners.outcome == 'success'
         continue-on-error: true
-        run: timeout --foreground 50m nix build .#checks.x86_64-linux.ci --accept-flake-config
-
-      - name: Dump failing source check log
-        if: steps.ci.outcome == 'failure'
         run: |
-          drv="$(nix eval --raw .#checks.x86_64-linux.source-checks.drvPath --accept-flake-config)"
-          nix log "$drv" | tail -n 400 || true
+          timeout --foreground 50m maintainers/scripts/ci-nix-build.sh linux-supported-surface \
+            .#checks.x86_64-linux.package-artifacts \
+            .#checks.x86_64-linux.module-render \
+            .#checks.x86_64-linux.runtime-smoke \
+            .#checks.x86_64-linux.platform-activation \
+            .#checks.x86_64-linux.runtime-plugin-packages \
+            .#checks.x86_64-linux.runtime-plugin-host \
+            .#checks.x86_64-linux.qmd-opt-in \
+            --accept-flake-config
+
+      - name: Summarize Linux HM activation timing
+        if: steps.supported_surface.outcome == 'success'
+        run: maintainers/scripts/summarize-hm-activation-timing.sh x86_64-linux linux-supported-surface
 
       - name: Record validation result
         id: validation
         if: always()
         run: |
           set -euo pipefail
-          if [[ "${{ steps.materialize.outcome }}" == "success" && "${{ steps.owners.outcome }}" == "success" && "${{ steps.ci.outcome }}" == "success" ]]; then
+          if [[ "${{ steps.materialize.outcome }}" == "success" && "${{ steps.owners.outcome }}" == "success" && "${{ steps.supported_surface.outcome }}" == "success" ]]; then
             echo "validation_ok=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -138,7 +146,7 @@ jobs:
             echo
             echo "- Materialize: \`${{ steps.materialize.outcome }}\`"
             echo "- flake.lock owners: \`${{ steps.owners.outcome }}\`"
-            echo "- CI aggregator: \`${{ steps.ci.outcome }}\`"
+            echo "- Supported surface: \`${{ steps.supported_surface.outcome }}\`"
             echo
             echo "Promotion skipped; pinned source remains unchanged."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -147,7 +155,7 @@ jobs:
     needs: select
     if: needs.select.outputs.has_update == 'true'
     runs-on: macos-14
-    timeout-minutes: 40
+    timeout-minutes: 60
     outputs:
       materialization_digest: ${{ steps.materialization.outputs.materialization_digest }}
       validation_ok: ${{ steps.validation.outputs.validation_ok }}
@@ -156,7 +164,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v22
+        uses: cachix/install-nix-action@v31
 
       - name: Materialize selected release
         id: materialize
@@ -175,39 +183,53 @@ jobs:
         if: steps.materialize.outcome == 'success'
         run: |
           set -euo pipefail
+          pin_files=()
+          while IFS= read -r file; do
+            pin_files+=("$file")
+          done < <(scripts/update-pins.sh files)
           digest="$(
-            git diff --binary -- \
-              nix/sources/openclaw-source.nix \
-              nix/packages/openclaw-app.nix \
-              nix/generated/openclaw-config-options.nix \
+            git diff --binary -- "${pin_files[@]}" \
               | shasum -a 256 \
               | awk '{ print $1 }'
           )"
           echo "materialization_digest=${digest}" >> "$GITHUB_OUTPUT"
 
-      - name: Build Darwin CI aggregator
-        id: ci
+      - name: Validate macOS supported surface
+        id: supported_surface
         if: steps.materialize.outcome == 'success'
         continue-on-error: true
-        timeout-minutes: 25
+        timeout-minutes: 45
         run: |
-          nix build --accept-flake-config .#openclaw-gateway
-          nix build --accept-flake-config .#openclaw-gateway-dogfood
-          nix build --accept-flake-config --option max-jobs 1 .#checks.aarch64-darwin.ci
+          maintainers/scripts/ci-nix-build.sh macos-supported-surface \
+            --accept-flake-config \
+            --option max-jobs 2 \
+            .#checks.aarch64-darwin.package-artifacts \
+            .#checks.aarch64-darwin.module-render \
+            .#checks.aarch64-darwin.runtime-smoke \
+            .#checks.aarch64-darwin.platform-activation \
+            .#checks.aarch64-darwin.runtime-plugin-packages \
+            .#checks.aarch64-darwin.runtime-plugin-host \
+            .#checks.aarch64-darwin.qmd-opt-in
 
       - name: Run HM activation
         id: hm
-        if: steps.materialize.outcome == 'success' && steps.ci.outcome == 'success'
+        if: steps.materialize.outcome == 'success' && steps.supported_surface.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 10
-        run: scripts/hm-activation-macos.sh
+        run: |
+          nix build \
+            --accept-flake-config \
+            --option max-jobs 2 \
+            --out-link result-platform-activation \
+            .#checks.aarch64-darwin.platform-activation
+          OPENCLAW_HM_ACTIVATION_PACKAGE="$PWD/result-platform-activation" scripts/hm-activation-macos.sh
 
       - name: Record validation result
         id: validation
         if: always()
         run: |
           set -euo pipefail
-          if [[ "${{ steps.materialize.outcome }}" == "success" && "${{ steps.ci.outcome }}" == "success" && "${{ steps.hm.outcome }}" == "success" ]]; then
+          if [[ "${{ steps.materialize.outcome }}" == "success" && "${{ steps.supported_surface.outcome }}" == "success" && "${{ steps.hm.outcome }}" == "success" ]]; then
             echo "validation_ok=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -217,7 +239,7 @@ jobs:
             echo "### macOS validation did not pass"
             echo
             echo "- Materialize: \`${{ steps.materialize.outcome }}\`"
-            echo "- CI aggregator: \`${{ steps.ci.outcome }}\`"
+            echo "- Supported surface: \`${{ steps.supported_surface.outcome }}\`"
             echo "- HM activation: \`${{ steps.hm.outcome }}\`"
             echo
             echo "Promotion skipped; pinned source remains unchanged."
@@ -246,7 +268,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v22
+        uses: cachix/install-nix-action@v31
 
       - name: Promote selected release
         env:
@@ -275,19 +297,18 @@ jobs:
             "${{ needs.select.outputs.app_tag }}" \
             "${{ needs.select.outputs.app_url }}"
 
-          if git diff --quiet -- \
-            nix/sources/openclaw-source.nix \
-            nix/packages/openclaw-app.nix \
-            nix/generated/openclaw-config-options.nix; then
+          pin_files=()
+          while IFS= read -r file; do
+            pin_files+=("$file")
+          done < <(scripts/update-pins.sh files)
+
+          if git diff --quiet -- "${pin_files[@]}"; then
             echo "No pin changes detected."
             exit 0
           fi
 
           promote_digest="$(
-            git diff --binary -- \
-              nix/sources/openclaw-source.nix \
-              nix/packages/openclaw-app.nix \
-              nix/generated/openclaw-config-options.nix \
+            git diff --binary -- "${pin_files[@]}" \
               | shasum -a 256 \
               | awk '{ print $1 }'
           )"
@@ -298,10 +319,7 @@ jobs:
             exit 1
           fi
 
-          git add \
-            nix/sources/openclaw-source.nix \
-            nix/packages/openclaw-app.nix \
-            nix/generated/openclaw-config-options.nix
+          git add "${pin_files[@]}"
 
           git commit -F - <<EOF
           🤖 codex: mirror OpenClaw stable source ${{ needs.select.outputs.source_tag }}
@@ -312,13 +330,11 @@ jobs:
           - keep the macOS app pin on the newest public app artifact
 
           Why:
-          - keep source-built OpenClaw current without blocking on public macOS app asset lag
+          - keep the npm-shrinkwrapped OpenClaw gateway current without blocking on public macOS app asset lag
 
           Tests:
-          - nix build .#checks.x86_64-linux.ci --accept-flake-config
-          - nix build --accept-flake-config .#openclaw-gateway
-          - nix build --accept-flake-config .#openclaw-gateway-dogfood
-          - nix build --accept-flake-config --option max-jobs 1 .#checks.aarch64-darwin.ci
+          - nix build .#checks.x86_64-linux.package-artifacts .#checks.x86_64-linux.module-render .#checks.x86_64-linux.runtime-smoke .#checks.x86_64-linux.platform-activation .#checks.x86_64-linux.runtime-plugin-packages .#checks.x86_64-linux.runtime-plugin-host .#checks.x86_64-linux.qmd-opt-in --accept-flake-config
+          - nix build --accept-flake-config --option max-jobs 2 .#checks.aarch64-darwin.package-artifacts .#checks.aarch64-darwin.module-render .#checks.aarch64-darwin.runtime-smoke .#checks.aarch64-darwin.platform-activation .#checks.aarch64-darwin.runtime-plugin-packages .#checks.aarch64-darwin.runtime-plugin-host .#checks.aarch64-darwin.qmd-opt-in
           - scripts/hm-activation-macos.sh
           EOF
 

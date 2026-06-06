@@ -37,6 +37,7 @@
 let
   sourceFetch = lib.removeAttrs sourceInfo [
     "pnpmDepsHash"
+    "gatewayNpmDepsHash"
     "pnpmMajor"
     "releaseTag"
     "releaseVersion"

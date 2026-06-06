@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - "**"
+      - main
   workflow_dispatch: {}
 
 permissions:
@@ -15,7 +15,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux:
+  flake-input-provenance:
+    name: Flake input provenance
+    # Policy proof only: flake.lock must not pull unreviewed GitHub owners into
+    # the build graph. This job intentionally builds no packages.
+    if: >-
+      ${{
+        github.repository == 'openclaw/nix-openclaw' &&
+        (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+        contains(fromJSON('["Asleep123","asleep123","badlogic","bjesuiter","christianklotz","cpojer","Evizero","evizero","gumadeiras","joshp123","mbelinky","mukhtharcm","obviyus","onutc","pasogott","sebslight","sergiopesch","shakkernerd","steipete","Takhoffman","takhoffman","thewilloftheshadow","tyler6204","vignesh07","github-actions[bot]"]'), github.actor)
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify flake.lock owners
+        run: scripts/check-flake-lock-owners.sh
+
+  linux-supported-surface:
+    name: Linux supported surface
+    needs: flake-input-provenance
+    # Linux is the primary install/apply regression surface. Build every named
+    # Linux proof group in one Nix invocation so shared dependencies are built
+    # or substituted once, while the attr list still documents each contract.
     if: >-
       ${{
         github.repository == 'openclaw/nix-openclaw' &&
@@ -28,22 +52,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Verify flake.lock owners
-        run: scripts/check-flake-lock-owners.sh
-
       - name: Install Nix
         uses: cachix/install-nix-action@v31
 
-      - name: Run Linux CI aggregator
-        run: timeout --foreground 50m nix build .#checks.x86_64-linux.ci --accept-flake-config
-
-      - name: Dump failing source check log
-        if: failure()
+      - name: Build Linux supported surface
         run: |
-          drv="$(nix eval --raw .#checks.x86_64-linux.source-checks.drvPath --accept-flake-config)"
-          nix log "$drv" | tail -n 400 || true
+          timeout --foreground 50m maintainers/scripts/ci-nix-build.sh linux-supported-surface \
+            .#checks.x86_64-linux.package-artifacts \
+            .#checks.x86_64-linux.module-render \
+            .#checks.x86_64-linux.runtime-smoke \
+            .#checks.x86_64-linux.platform-activation \
+            .#checks.x86_64-linux.runtime-plugin-packages \
+            .#checks.x86_64-linux.runtime-plugin-host \
+            .#checks.x86_64-linux.qmd-opt-in \
+            --accept-flake-config
 
-  macos:
+      - name: Summarize Linux activation timing
+        if: always()
+        run: maintainers/scripts/summarize-hm-activation-timing.sh x86_64-linux linux-supported-surface
+
+  macos-supported-surface:
+    name: macOS supported surface
+    needs: flake-input-provenance
+    # macOS proves the same supported package/module contracts on Darwin. The
+    # launchd step applies the already-built activation package from an explicit
+    # out-link so later builds cannot accidentally replace the `result` symlink.
     if: >-
       ${{
         github.repository == 'openclaw/nix-openclaw' &&
@@ -51,21 +84,34 @@ jobs:
         contains(fromJSON('["Asleep123","asleep123","badlogic","bjesuiter","christianklotz","cpojer","Evizero","evizero","gumadeiras","joshp123","mbelinky","mukhtharcm","obviyus","onutc","pasogott","sebslight","sergiopesch","shakkernerd","steipete","Takhoffman","takhoffman","thewilloftheshadow","tyler6204","vignesh07","github-actions[bot]"]'), github.actor)
       }}
     runs-on: macos-14
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v22
+        uses: cachix/install-nix-action@v31
 
-      - name: Build Darwin CI aggregator
-        timeout-minutes: 25
+      - name: Build macOS supported surface
+        timeout-minutes: 45
         run: |
-          nix build --accept-flake-config .#openclaw-gateway
-          nix build --accept-flake-config .#openclaw-gateway-dogfood
-          nix build --accept-flake-config --option max-jobs 1 .#checks.aarch64-darwin.ci
+          maintainers/scripts/ci-nix-build.sh macos-supported-surface \
+            --accept-flake-config \
+            --option max-jobs 2 \
+            .#checks.aarch64-darwin.package-artifacts \
+            .#checks.aarch64-darwin.module-render \
+            .#checks.aarch64-darwin.runtime-smoke \
+            .#checks.aarch64-darwin.platform-activation \
+            .#checks.aarch64-darwin.runtime-plugin-packages \
+            .#checks.aarch64-darwin.runtime-plugin-host \
+            .#checks.aarch64-darwin.qmd-opt-in
 
-      - name: Run HM activation
+      - name: Run launchd activation
         timeout-minutes: 10
-        run: scripts/hm-activation-macos.sh
+        run: |
+          nix build \
+            --accept-flake-config \
+            --option max-jobs 2 \
+            --out-link result-platform-activation \
+            .#checks.aarch64-darwin.platform-activation
+          OPENCLAW_HM_ACTIVATION_PACKAGE="$PWD/result-platform-activation" scripts/hm-activation-macos.sh
