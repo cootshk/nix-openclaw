@@ -128,6 +128,7 @@ nixpkgs `16c7794d0a28b5a37904d55bcca36003b9109aaa`.
 | `pr100-acpx-store-symlink-2026-06-06` | `2c0a5286490e` | `432c93725f85` | symlink bundled ACPX from generated runtime plugin package | gateway output much smaller; warm CI returns to baseline speed |
 | `pr100-json-log-sidecar-2026-06-06` | `98aa2691ac12` | `979ee4e6b076` | capture Nix internal-json sidecars in CI meter | no package/check graph change; structured build events available by default |
 | `pr100-json-log-sidecar-opt-in-2026-06-06` | `c8d1baca6cb6` | `03eff14f0de1` | make the Nix internal-json sidecar opt-in | default CI log/parser overhead removed; no proven wall-clock win |
+| `pr100-darwin-activation-reuse-2026-06-06` | `786cc73dc4aa` | `6d329708bd51` | reuse the Darwin CI aggregate activation package for the impure launchd smoke | macOS activation step faster; apply proof retained |
 
 ## Runs
 
@@ -1708,6 +1709,79 @@ Remote proof for measured commit:
   - macOS job `2m06s`, aggregate step `77s`, wrapper `76s`;
   - no `json-log=` startup line and no `*-structured` summary.
 - PR merge state after attempt 2: `CLEAN`.
+- Garnix checks remained green on the same head.
+
+### `pr100-darwin-activation-reuse-2026-06-06`
+
+- PR: `#100`
+- Base commit: `786cc73dc4aaccd7ee9c8a99c3e1a07c510093b4`
+- Measured code commit: `6d329708bd519cab1026f3047d9eb08791ef0fdd`
+- Purpose:
+  - avoid running `nix build .#checks.aarch64-darwin.hm-activation-macos-package`
+    immediately after `.#checks.aarch64-darwin.ci` already realized that
+    activation package;
+  - keep the impure macOS Home Manager activation, launchd start, and gateway
+    health proof as a separate workflow step;
+  - preserve the local script fallback for maintainers running the activation
+    smoke without a prebuilt aggregate result.
+- Anti-regression review:
+  - The workflow now passes `OPENCLAW_HM_ACTIVATION_PACKAGE="$PWD/result"` to
+    `scripts/hm-activation-macos.sh`.
+  - `result/activate` from the Darwin `ci` aggregate was locally compared with
+    the direct `hm-activation-macos-package` activation script and was
+    byte-identical.
+  - The activation step still creates the temporary Home Manager profile, links
+    files, bootstraps launchd, and checks gateway health. The remaining
+    `user-environment` derivation in the activation step is the Home Manager
+    profile install, not the removed duplicate package build.
+
+| Metric | Baseline provenance | Baseline | Measured provenance | Measured | Change | Command |
+| --- | --- | ---: | --- | ---: | ---: | --- |
+| macOS activation workflow command | `786cc73`, CI workflow | `scripts/hm-activation-macos.sh` | `6d329708`, CI workflow | `OPENCLAW_HM_ACTIVATION_PACKAGE="$PWD/result" scripts/hm-activation-macos.sh` | duplicate activation-package build request removed | `git diff 786cc73..6d329708 -- .github/workflows/ci.yml .github/workflows/pin-stable-openclaw-version.yml scripts/hm-activation-macos.sh` |
+| Remote macOS HM activation GitHub step | run `27055998555`, head `786cc73` | 15s | run `27056280259`, head `6d329708` | 5s | 66.7% faster | `gh run view <run> --json jobs` |
+| Remote macOS HM activation parsed step | run `27055998555` | 7.89s | run `27056280259` | 1.38s | 82.5% faster | `scripts/summarize-nix-build-log.mjs --github-log /tmp/nix-openclaw-ci-logs/run-<run>.log` |
+| Remote macOS HM activation input fetches | run `27055998555` | 1 | run `27056280259` | 0 | removed | same parser |
+| Remote macOS aggregate step | run `27055998555` | 92s, 226 fetched paths, 230 copied paths, 0 built drvs | run `27056280259` | 66s, 226 fetched paths, 230 copied paths, 0 built drvs | 26s faster from runner/copy variance, graph unchanged | same parser |
+| Remote macOS job duration | run `27055998555` | 2m24s | run `27056280259` | 1m45s | 27.1% faster, aggregate variance included | `gh run view <run> --json jobs` |
+| Remote Linux aggregate step | run `27055998555` | 108s, 924 fetched paths, 928 copied paths, 27 built drvs | run `27056280259` | 121s, 924 fetched paths, 928 copied paths, 27 built drvs | 13s slower from runner/build variance, graph unchanged | parser command above |
+| Remote Linux job duration | run `27055998555` | 1m58s | run `27056280259` | 2m10s | 12s slower, unrelated to Darwin workflow change | `gh run view <run> --json jobs` |
+| Garnix all checks | run `27055998555` PR checks | 26s, success | run `27056280259` PR checks | 26s, success | unchanged | `gh pr view 100 --json statusCheckRollup` |
+
+Interpretation:
+
+- Accept this as a small real CI simplification and macOS activation-step
+  speedup.
+- Do not count the full macOS job win as solely caused by this change: the
+  aggregate step was also faster while its graph and copy counts stayed
+  unchanged.
+- The remaining dominant CI cost is still Linux hosted-runner substitution plus
+  the Linux Home Manager/NixOS apply proof. This change does not move that
+  bottleneck.
+
+Local proof for measured commit:
+
+- `bash -n scripts/hm-activation-macos.sh scripts/ci-nix-build.sh scripts/update-pins.sh`
+- `ruby -e 'require "yaml"; ARGV.each { |path| YAML.load_file(path) }; puts "yaml ok"' .github/workflows/ci.yml .github/workflows/pin-stable-openclaw-version.yml garnix.yaml`
+- `node --check scripts/summarize-nix-build-log.mjs`
+- `node --check scripts/summarize-nix-build-closure.mjs`
+- `node --check scripts/summarize-nix-eval-jobs.mjs`
+- `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-darwin-ci-prebuilt-activation --accept-flake-config --option max-jobs 2 .#checks.aarch64-darwin.ci`
+- `/usr/bin/time -p env OPENCLAW_HM_ACTIVATION_PACKAGE="$PWD/result" scripts/hm-activation-macos.sh` (`real 5.46s`)
+- `cmp -s "$PWD/result/activate" "$(nix build --accept-flake-config --no-link --print-out-paths .#checks.aarch64-darwin.hm-activation-macos-package)/activate"`
+- `git diff --check`
+
+Remote proof for measured commit:
+
+- GitHub Actions run: `27056280259`, success, `pull_request`, head
+  `6d329708bd519cab1026f3047d9eb08791ef0fdd`.
+- macOS job `1m45s`; Darwin aggregate step `66s`; HM activation step `5s`;
+  parsed HM activation step `1.38s`.
+- Linux job `2m10s`; aggregate step `121s`; unchanged `924` planned fetched
+  paths, `928` copied paths, and `27` built derivations.
+- The HM activation log shows
+  `OPENCLAW_HM_ACTIVATION_PACKAGE="$PWD/result" scripts/hm-activation-macos.sh`
+  and no `nix build ...hm-activation-macos-package` command in that step.
+- PR merge state after the run: `CLEAN`.
 - Garnix checks remained green on the same head.
 
 ## Add A Run
