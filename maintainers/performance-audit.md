@@ -123,7 +123,7 @@ nixpkgs `16c7794d0a28b5a37904d55bcca36003b9109aaa`.
 | `pr100-runtime-plugin-smoke-split-2026-06-06` | `148be063849b` | `196d6377fa13` | split runtime plugin smokes out of the default CI gate | default CI no longer depends on Slack/diagnostics plugin packages; explicit plugin smokes retained |
 | `pr100-single-nix-installer-action-2026-06-06` | `bde5f61d5508` | `7295cda03e52` | use `cachix/install-nix-action` for macOS workflows too | macOS job faster; workflow still Linux-bound |
 | `pr100-acpx-store-symlink-2026-06-06` | `2c0a5286490e` | `432c93725f85` | symlink bundled ACPX from generated runtime plugin package | gateway output much smaller; warm CI returns to baseline speed |
-| `pr100-json-log-sidecar-2026-06-06` | `98aa2691ac12` | `d2346400c32b` | capture Nix internal-json sidecars in CI meter | no package/check graph change; structured build events available by default |
+| `pr100-json-log-sidecar-2026-06-06` | `98aa2691ac12` | `979ee4e6b076` | capture Nix internal-json sidecars in CI meter | no package/check graph change; structured build events available by default |
 
 ## Runs
 
@@ -1561,7 +1561,7 @@ Remote proof for measured commit:
 
 - PR: `#100`
 - Base commit: `98aa2691ac1297c5eef8b915a1921257cf42df4f`
-- Measured code commit: `d2346400c32bad73261dae0dfcdb84aebb44a508`
+- Measured code commit: `979ee4e6b07642b8e48e0ac995b4cc717245006e`
 - Purpose:
   - keep the existing timestamped human stderr meter;
   - also capture Nix's internal-json event stream through `json-log-path`;
@@ -1588,14 +1588,15 @@ Remote proof for measured commit:
 
 | Metric | Baseline provenance | Baseline | Measured provenance | Measured | Change | Command |
 | --- | --- | ---: | --- | ---: | ---: | --- |
-| Linux gateway drv path | `98aa2691` current head | `/nix/store/fzhg6klc72vb9cq4m65264v0k8q0cyig-openclaw-gateway-2026.6.1.drv` | `d2346400` | same | unchanged | `nix eval --raw .#packages.x86_64-linux.openclaw-gateway.drvPath` |
-| Linux `openclaw` drv path | `98aa2691` current head | `/nix/store/dw4dilr864x4arabr3ldp8hkwl2c7c9v-openclaw-2026.6.1.drv` | `d2346400` | same | unchanged | `nix eval --raw .#packages.x86_64-linux.openclaw.drvPath` |
-| Linux CI aggregate drv path | `98aa2691` current head | `/nix/store/bai7gs76kxp9nwa4ai2hnxx6z3a72w5w-nix-openclaw-ci.drv` | `d2346400` | same | unchanged | `nix eval --raw .#checks.x86_64-linux.ci.drvPath` |
-| Darwin gateway drv path | `98aa2691` current head | `/nix/store/xkby3zsdv4ljgl31v815ai4j0qq9kpga-openclaw-gateway-2026.6.1.drv` | `d2346400` | same | unchanged | `nix eval --raw .#packages.aarch64-darwin.openclaw-gateway.drvPath` |
-| Darwin CI aggregate drv path | `98aa2691` current head | `/nix/store/90msmdlvzcqz0k7xwq0h0z63gq6pr4pv-nix-openclaw-ci.drv` | `d2346400` | same | unchanged | `nix eval --raw .#checks.aarch64-darwin.ci.drvPath` |
+| Linux gateway drv path | `98aa2691` current head | `/nix/store/fzhg6klc72vb9cq4m65264v0k8q0cyig-openclaw-gateway-2026.6.1.drv` | `979ee4e6` | same | unchanged | `nix eval --raw .#packages.x86_64-linux.openclaw-gateway.drvPath` |
+| Linux `openclaw` drv path | `98aa2691` current head | `/nix/store/dw4dilr864x4arabr3ldp8hkwl2c7c9v-openclaw-2026.6.1.drv` | `979ee4e6` | same | unchanged | `nix eval --raw .#packages.x86_64-linux.openclaw.drvPath` |
+| Linux CI aggregate drv path | `98aa2691` current head | `/nix/store/bai7gs76kxp9nwa4ai2hnxx6z3a72w5w-nix-openclaw-ci.drv` | `979ee4e6` | same | unchanged | `nix eval --raw .#checks.x86_64-linux.ci.drvPath` |
+| Darwin gateway drv path | `98aa2691` current head | `/nix/store/xkby3zsdv4ljgl31v815ai4j0qq9kpga-openclaw-gateway-2026.6.1.drv` | `979ee4e6` | same | unchanged | `nix eval --raw .#packages.aarch64-darwin.openclaw-gateway.drvPath` |
+| Darwin CI aggregate drv path | `98aa2691` current head | `/nix/store/90msmdlvzcqz0k7xwq0h0z63gq6pr4pv-nix-openclaw-ci.drv` | `979ee4e6` | same | unchanged | `nix eval --raw .#checks.aarch64-darwin.ci.drvPath` |
 | Wrapper cached structured events | no sidecar summary | 0 | local wrapper probe | 41 events, 14 starts, 14 stops | added | `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-json-sidecar-wrapper --accept-flake-config --no-link .#checks.aarch64-darwin.config-validity` |
 | Rebuild/check built drv attribution | human stderr meter | 0 built drvs | local sidecar probe | 1 built drv | undercount fixed for structured sidecar | `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-json-sidecar-rebuild --accept-flake-config --rebuild --no-link .#checks.aarch64-darwin.config-validity` |
-| Direct `json-log-path` sidecar parse | parser at `98aa2691` | unsupported bare JSON | parser at `d2346400` | 24 events parsed | added | `scripts/summarize-nix-build-log.mjs --label local-json-log-sidecar /tmp/nix-openclaw-json-log.tneQIN.jsonl` |
+| Direct `json-log-path` sidecar parse | parser at `98aa2691` | unsupported bare JSON | parser at `979ee4e6` | 24 events parsed | added | `scripts/summarize-nix-build-log.mjs --label local-json-log-sidecar /tmp/nix-openclaw-json-log.tneQIN.jsonl` |
+| Remote Linux structured built drv lines | `3bec34b1` run `27055356097` | 27 unique / 54 lines | `979ee4e6` run `27055444039` | 27 unique / 27 lines | double count fixed | `rg -n 'linux-ci-structured' /tmp/nix-openclaw-ci-logs/run-<run>.log` |
 
 Interpretation:
 
@@ -1614,6 +1615,31 @@ Local proof for measured commit:
 - `scripts/summarize-nix-build-log.mjs --label local-json-log-sidecar /tmp/nix-openclaw-json-log.tneQIN.jsonl`
 - `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-json-sidecar-wrapper --accept-flake-config --no-link .#checks.aarch64-darwin.config-validity`
 - `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-json-sidecar-rebuild --accept-flake-config --rebuild --no-link .#checks.aarch64-darwin.config-validity`
+- `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-darwin-ci-json-sidecar --accept-flake-config --option max-jobs 2 --no-link .#checks.aarch64-darwin.ci`
+- `scripts/summarize-nix-build-log.mjs --label local-json-sidecar-rebuild-structured /tmp/nix-openclaw-ci-meter/local-json-sidecar-rebuild.nix.jsonl`
+
+Remote proof for measured commit:
+
+- GitHub Actions run: `27055444039`, success, `pull_request`,
+  `2026-06-06T06:50:39Z` to `2026-06-06T06:52:56Z`.
+- Head: `979ee4e6b07642b8e48e0ac995b4cc717245006e`.
+- PR merge state after the run: `CLEAN`.
+- Linux job:
+  - job duration: `2m14s`;
+  - aggregate step: `125s`;
+  - fetch/copy/build summary: `924` planned paths, `932 MiB` download,
+    `4.2 GiB` unpacked, `928` copied paths, `27` planned/built derivations;
+  - structured sidecar: `945,716` events, `5,953` starts, `5,953` stops,
+    `932,856` results, `27 unique / 27 lines` built drvs.
+- macOS job:
+  - job duration: `1m55s`;
+  - aggregate step: `71s`;
+  - HM activation parsed Nix step: `6.06s`;
+  - aggregate fetch/copy summary: `226` planned paths, `328 MiB` download,
+    `1.8 GiB` unpacked, `230` copied paths, `0` built derivations;
+  - structured sidecar: `447,629` events, `2,016` starts, `2,016` stops,
+    `443,369` results.
+- Garnix and Socket checks passed on the same head.
 
 ## Add A Run
 
