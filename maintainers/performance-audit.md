@@ -129,6 +129,7 @@ nixpkgs `16c7794d0a28b5a37904d55bcca36003b9109aaa`.
 | `pr100-json-log-sidecar-2026-06-06` | `98aa2691ac12` | `979ee4e6b076` | capture Nix internal-json sidecars in CI meter | no package/check graph change; structured build events available by default |
 | `pr100-json-log-sidecar-opt-in-2026-06-06` | `c8d1baca6cb6` | `03eff14f0de1` | make the Nix internal-json sidecar opt-in | default CI log/parser overhead removed; no proven wall-clock win |
 | `pr100-darwin-activation-reuse-2026-06-06` | `786cc73dc4aa` | `6d329708bd51` | reuse the Darwin CI aggregate activation package for the impure launchd smoke | macOS activation step faster; apply proof retained |
+| `pr100-runtime-plugin-lock-split-2026-06-06` | `198df99f82bc` | `afc82b33b683` | split broad runtime plugin lock proof out of the default CI gate | default `ci` inputs 13 -> 12 on both systems; explicit lock proof retained |
 
 ## Runs
 
@@ -1781,6 +1782,75 @@ Remote proof for measured commit:
 - The HM activation log shows
   `OPENCLAW_HM_ACTIVATION_PACKAGE="$PWD/result" scripts/hm-activation-macos.sh`
   and no `nix build ...hm-activation-macos-package` command in that step.
+- PR merge state after the run: `CLEAN`.
+- Garnix checks remained green on the same head.
+
+### `pr100-runtime-plugin-lock-split-2026-06-06`
+
+- PR: `#100`
+- Base commit: `198df99f82bca2fca1f4c85b74a13c9e31d82ce2`
+- Measured code commit: `afc82b33b683395e302ee1ab24c2d6e88302f67f`
+- Purpose:
+  - keep PR `#100`'s default `ci` aggregate focused on the default package,
+    config, and apply contract;
+  - move broad runtime plugin lock/catalog validation to the explicit
+    `runtime-plugin-locks` check surface owned by the plugin/shrinkwrap lane;
+  - preserve default ACPX proof through the gateway package assertions and
+    package-contents check.
+- Anti-regression review:
+  - `checks.*.runtime-plugin-locks` still exists on Linux and Darwin.
+  - `openclaw-gateway-npm.nix` still asserts bundled ACPX id/version, and
+    `check-package-contents.sh` still requires the default gateway ACPX files.
+  - No package output, module option, workflow command, or user-facing
+    interface changed.
+
+| Metric | Baseline provenance | Baseline | Measured provenance | Measured | Change | Command |
+| --- | --- | ---: | --- | ---: | ---: | --- |
+| Linux `ci` direct derivation inputs | `198df99f` `ci` drv | 13 | `afc82b33` `ci` drv | 12 | 1 fewer | `nix derivation show "$drv" \| jq -r '.derivations[] \| .inputs.drvs \| keys \| length'` |
+| Darwin `ci` direct derivation inputs | `198df99f` `ci` drv | 13 | `afc82b33` `ci` drv | 12 | 1 fewer | same |
+| Linux `runtime-plugin-locks` direct input in `ci` | `198df99f` `ci` drv | 1 | `afc82b33` `ci` drv | 0 | removed from default gate | `nix derivation show "$drv" \| jq -r '.derivations[] \| .inputs.drvs \| keys[]' \| rg -c 'openclaw-runtime-plugin-locks'` |
+| Darwin `runtime-plugin-locks` direct input in `ci` | `198df99f` `ci` drv | 1 | `afc82b33` `ci` drv | 0 | removed from default gate | same |
+| Explicit `runtime-plugin-locks` check attrs | `198df99f` flake checks | present on both systems | `afc82b33` flake checks | present on both systems | retained | `nix eval --accept-flake-config --json .#checks.<system> --apply 'attrs: builtins.attrNames attrs'` |
+| Local Darwin default CI proof | warm local store | n/a | `afc82b33` local run | 11s, 1 planned/built aggregate drv | recorded | `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-darwin-ci-runtime-lock-split --accept-flake-config --option max-jobs 2 --no-link .#checks.aarch64-darwin.ci` |
+| Local Linux default CI proof | warm local store, remote Linux builder | n/a | `afc82b33` local run | 15s, 1 planned/built aggregate drv | recorded | `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-linux-ci-runtime-lock-split --accept-flake-config --no-link .#checks.x86_64-linux.ci` |
+| Explicit runtime-plugin lock proof | warm local store | n/a | `afc82b33` local run | 1s, passed Linux and Darwin | retained | `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-runtime-plugin-locks-explicit --accept-flake-config --no-link .#checks.aarch64-darwin.runtime-plugin-locks .#checks.x86_64-linux.runtime-plugin-locks` |
+| Remote Linux aggregate parsed step | run `27056370270`, head `198df99f` | 123s, 27 planned/built derivations | run `27056930091`, head `afc82b33` | 119s, 26 planned/built derivations | 1 fewer build; 4s faster sample | `scripts/summarize-nix-build-log.mjs --github-log /tmp/nix-openclaw-ci-logs/run-<run>.log` |
+| Remote Linux aggregate wrapper seconds | run `27056370270` | 121s | run `27056930091` | 118s | 3s faster sample | `rg -n 'nix-meter: end label=linux-ci' /tmp/nix-openclaw-ci-logs/run-<run>.log` |
+| Remote Linux fetched/copy volume | run `27056370270` | 924 fetched paths, 928 copied paths | run `27056930091` | 924 fetched paths, 928 copied paths | unchanged | parser command above |
+| Remote macOS aggregate parsed step | run `27056370270`, head `198df99f` | 67s, 0 built derivations | run `27056930091`, head `afc82b33` | 84s, 0 built derivations | 17s slower from runner/copy variance | parser command above |
+| Remote macOS job duration | run `27056370270` | 1m47s | run `27056930091` | 2m08s | slower sample, graph/copy counts unchanged | `gh run view <run> --json jobs` |
+| Garnix all checks | run `27056370270` PR checks | 26s, success | run `27056930091` PR checks | 56s, success | slower sample, green | `gh pr view 100 --json statusCheckRollup` |
+
+Interpretation:
+
+- Accept this as a small graph simplification, not a major wall-clock win.
+- The one remote Linux derivation removed is the broad runtime plugin lock
+  check. Remote fetch/copy volume is unchanged because that check is tiny and
+  shares the same Node/Bash/stdenv inputs already present in the aggregate.
+- The macOS wall-time movement is noise: it built no extra derivations and
+  copied the same `226` planned paths / `230` path lines as the baseline.
+- Correctness is retained because default ACPX remains part of the default
+  gateway/package-content proof, while broad plugin catalog lock validation
+  remains explicitly runnable.
+
+Local proof for measured commit:
+
+- `git diff --check`
+- `nix eval --accept-flake-config --json .#checks.x86_64-linux --apply 'attrs: builtins.attrNames attrs'`
+- `nix eval --accept-flake-config --json .#checks.aarch64-darwin --apply 'attrs: builtins.attrNames attrs'`
+- `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-darwin-ci-runtime-lock-split --accept-flake-config --option max-jobs 2 --no-link .#checks.aarch64-darwin.ci`
+- `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-runtime-plugin-locks-explicit --accept-flake-config --no-link .#checks.aarch64-darwin.runtime-plugin-locks .#checks.x86_64-linux.runtime-plugin-locks`
+- `RUNNER_TEMP=/tmp NIX_METER_BUILD_CLOSURE=0 scripts/ci-nix-build.sh local-linux-ci-runtime-lock-split --accept-flake-config --no-link .#checks.x86_64-linux.ci`
+
+Remote proof for measured commit:
+
+- GitHub Actions run: `27056930091`, success, `pull_request`, head
+  `afc82b33b683395e302ee1ab24c2d6e88302f67f`.
+- Linux job `2m07s`; aggregate step `120s`; wrapper `118s`; `924`
+  planned fetched paths; `928` copied paths; `26` planned/built derivations.
+- macOS job `2m08s`; Darwin aggregate step `84s`; wrapper `82s`; `226`
+  planned fetched paths; `230` copied paths; `0` built derivations; HM
+  activation parsed step `1.87s`.
 - PR merge state after the run: `CLEAN`.
 - Garnix checks remained green on the same head.
 
