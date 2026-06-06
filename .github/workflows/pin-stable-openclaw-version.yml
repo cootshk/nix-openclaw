@@ -78,6 +78,7 @@ jobs:
         uses: cachix/install-nix-action@v31
 
       - name: Cache Nix store
+        if: runner.os == 'Linux'
         uses: DeterminateSystems/magic-nix-cache-action@v14
         with:
           use-gha-cache: enabled
@@ -161,6 +162,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v22
 
       - name: Cache Nix store
+        if: runner.os == 'Linux'
         uses: DeterminateSystems/magic-nix-cache-action@v14
         with:
           use-gha-cache: enabled
@@ -256,6 +258,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v22
 
       - name: Cache Nix store
+        if: runner.os == 'Linux'
         uses: DeterminateSystems/magic-nix-cache-action@v14
         with:
           use-gha-cache: enabled
