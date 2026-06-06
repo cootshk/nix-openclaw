@@ -46,8 +46,8 @@ in
 {
   inherit pnpm_11;
   inherit openclawRuntimePlugins;
+  qmd = qmdPackage;
   openclaw-gateway = openclawGateway;
   openclaw = openclawBundle;
 }
-// (if qmdPackage != null then { qmd = qmdPackage; } else { })
 // (if isDarwin then { openclaw-app = openclawApp; } else { })

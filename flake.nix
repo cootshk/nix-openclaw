@@ -123,7 +123,7 @@
                 openclawGateway = packageSetStable.openclaw-gateway;
               };
             };
-            qmdChecks = pkgs.lib.optionalAttrs (qmdPackage != null) {
+            qmdChecks = {
               qmd-instance = pkgs.callPackage ./nix/checks/openclaw-default-instance.nix {
                 includeQmdChecks = true;
               };
