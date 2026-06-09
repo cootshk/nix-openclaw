@@ -19,7 +19,10 @@ if [[ ! -f "$allow_file" ]]; then
   exit 1
 fi
 
-mapfile -t allowed < <(
+allowed=()
+while IFS= read -r owner; do
+  allowed+=("$owner")
+done < <(
   sed -e 's/#.*$//' -e 's/[[:space:]]*$//' -e 's/^[[:space:]]*//' "$allow_file" | awk 'NF' | sort -u
 )
 
@@ -28,7 +31,10 @@ if [[ ${#allowed[@]} -eq 0 ]]; then
   exit 1
 fi
 
-mapfile -t owners < <(
+owners=()
+while IFS= read -r owner; do
+  owners+=("$owner")
+done < <(
   jq -r '.nodes[].locked | select(.type == "github") | "\(.owner)/\(.repo)"' "$lock_file" | sort -u
 )
 
