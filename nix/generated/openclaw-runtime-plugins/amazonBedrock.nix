@@ -13,15 +13,15 @@
   minHostVersion = ">=2026.5.12-beta.1";
   expectedIntegrity = "";
   packageName = "@openclaw/amazon-bedrock-provider";
-  version = "2026.6.5";
-  tarballUrl = "https://registry.npmjs.org/@openclaw/amazon-bedrock-provider/-/amazon-bedrock-provider-2026.6.5.tgz";
-  npmIntegrity = "sha512-p+0iTeYa4ZXD7vSyJXN6dKNHVIuhn9FEkxI/BT1HzRvhToFiJR2vLnbCAqcvFQbXDQYKqHUnM9wsWwhoOafZ+g==";
-  npmShasum = "e2e71f8ef3320bae87d84d88d29d542449833d2e";
-  nixHash = "sha256-2Lo3PFEFTQFrdqqwfYmNvuINwFGou8Pr/hX0Rnbur1U=";
+  version = "2026.6.6";
+  tarballUrl = "https://registry.npmjs.org/@openclaw/amazon-bedrock-provider/-/amazon-bedrock-provider-2026.6.6.tgz";
+  npmIntegrity = "sha512-R9fPkuhhxRkAbihtUeDvHuH3yE9/pbCn7RBQby91W0I5MRLPb56FgfRQIS/88Gx2TP2Zq+upvIqfwoeEUhZABA==";
+  npmShasum = "2ba7510204b95a01ca6047247c32d8297dc41120";
+  nixHash = "sha256-fBxd8v4wzNHNSr5RT/5k5fF0qUr4IgFNZCcN4MxWhKA=";
   dependencyMode = "bundled";
   manifestId = "amazon-bedrock";
-  openclawCompat = ">=2026.6.5";
-  peerOpenClaw = ">=2026.6.5";
+  openclawCompat = ">=2026.6.6";
+  peerOpenClaw = ">=2026.6.6";
   runtimeExtensions = [
     "./dist/index.js"
   ];
@@ -35,10 +35,10 @@
   dependencies = {
     "@aws-sdk/client-bedrock" = "3.1056.0";
     "@aws-sdk/client-bedrock-runtime" = "3.1056.0";
-    "@aws-sdk/credential-provider-node" = "3.972.46";
-    "@smithy/node-http-handler" = "4.7.5";
+    "@aws-sdk/credential-provider-node" = "3.972.52";
+    "@smithy/node-http-handler" = "4.7.7";
     "@smithy/shared-ini-file-loader" = "4.5.5";
-    "@smithy/types" = "4.14.2";
+    "@smithy/types" = "4.14.3";
   };
   optionalDependencies = { };
   bundleDependencies = [
@@ -66,6 +66,7 @@
     "node_modules/@aws-sdk/credential-provider-node"
     "node_modules/@aws-sdk/credential-provider-process"
     "node_modules/@aws-sdk/credential-provider-sso"
+    "node_modules/@aws-sdk/credential-provider-sso/node_modules/@aws-sdk/token-providers"
     "node_modules/@aws-sdk/credential-provider-web-identity"
     "node_modules/@aws-sdk/eventstream-handler-node"
     "node_modules/@aws-sdk/middleware-eventstream"

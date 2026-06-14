@@ -6,9 +6,9 @@
   applyPublicSurfaceHardlinksPatch = false;
   applySkipPluginAutoEnableNixModePatch = false;
   applyNixStorePluginOwnershipPatch = true;
-  releaseTag = "v2026.6.5";
-  releaseVersion = "2026.6.5";
-  rev = "5181e4f7c82bd373cb215a5619b0fa03c13862b7";
-  hash = "sha256-hiYbIhE13XMFIeB0zmb6AHlfw8le6vpJgCqN81YWGsE=";
-  gatewayNpmDepsHash = "sha256-CiPR/KuDJPmbIC7EHm4IWjuyxQhUT6gnH2hP1I1gRQw=";
+  releaseTag = "v2026.6.6";
+  releaseVersion = "2026.6.6";
+  rev = "8c802aa683510c7f7503597b54c3021733245e59";
+  hash = "sha256-sgLyNHQNnuEWZBaIxqJUz9o0x+P1EgNuLlUfy1iRunk=";
+  gatewayNpmDepsHash = "sha256-nvpB8KwfQcG2A51guXul7AtUFrVKe2HZdWE3mIgqtqA=";
 }

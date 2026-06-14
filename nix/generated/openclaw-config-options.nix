@@ -1,4 +1,4 @@
-# Generated from upstream OpenClaw schema at rev 5181e4f7c82bd373cb215a5619b0fa03c13862b7. DO NOT EDIT.
+# Generated from upstream OpenClaw schema at rev 8c802aa683510c7f7503597b54c3021733245e59. DO NOT EDIT.
 # Generator: nix/scripts/generate-config-options.ts
 { lib }:
 let
@@ -11196,6 +11196,21 @@ in
     };
     maxUtterances = lib.mkOption {
       type = t.nullOr (t.int);
+      default = null;
+    };
+  }; });
+    default = null;
+  };
+
+  tui = lib.mkOption {
+    type = t.nullOr (t.submodule { options = {
+    footer = lib.mkOption {
+      type = t.nullOr (t.submodule { options = {
+      showRemoteHost = lib.mkOption {
+        type = t.nullOr (t.bool);
+        default = null;
+      };
+    }; });
       default = null;
     };
   }; });

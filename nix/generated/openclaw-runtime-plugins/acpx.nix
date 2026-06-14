@@ -13,16 +13,16 @@
   minHostVersion = ">=2026.4.25";
   expectedIntegrity = "";
   packageName = "@openclaw/acpx";
-  version = "2026.6.5";
-  tarballUrl = "https://registry.npmjs.org/@openclaw/acpx/-/acpx-2026.6.5.tgz";
-  npmIntegrity = "sha512-p2wl/vn/uMx+G2mDPNUfx/a/AwACXAfcCu7IdiYVtv02wjntDoBEJndM4WRTswtdFcYGW4a8DXMCj/qpbg6K4Q==";
-  npmShasum = "d4d0efed58eb34b4080277f42ee83f4a577dc0c7";
-  nixHash = "sha256-tizPyUckmQEGdQV6vEfRTEe0mYgp8XtIm6vGXvU4j1U=";
+  version = "2026.6.6";
+  tarballUrl = "https://registry.npmjs.org/@openclaw/acpx/-/acpx-2026.6.6.tgz";
+  npmIntegrity = "sha512-O1H4kGFs1w8zFq3WQfqNYSm8cYacg1Ok3Kzogseqna0AAby3pJXt6C35g+PxZKZAOZuaARbFBPLlB571cKCWmw==";
+  npmShasum = "1897fc30ae064299018f24bbb52b3e5f698506c7";
+  nixHash = "sha256-nq29kgwxcKPO4a1mCM9e6lfpX7JHqT504i9kaKob2T4=";
   dependencyMode = "shrinkwrap";
-  npmDepsHash = "sha256-g3V65M4fuZVOs5ziN3j/IXNwbuKjHNzwbumxI7++vYA=";
+  npmDepsHash = "sha256-Vwyx3yY+joQXD7wZXOrbJpTR3hZjRmtGfo1ByAep4iw=";
   manifestId = "acpx";
-  openclawCompat = ">=2026.6.5";
-  peerOpenClaw = ">=2026.6.5";
+  openclawCompat = ">=2026.6.6";
+  peerOpenClaw = ">=2026.6.6";
   runtimeExtensions = [
     "./dist/index.js"
   ];

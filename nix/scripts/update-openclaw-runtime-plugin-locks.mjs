@@ -923,7 +923,22 @@ async function resolveNpmArtifact(row, npmPackage) {
 }
 
 async function resolveClawHubArtifact(row, clawhubPackage) {
-  const payload = await fetchJsonWithRetries(clawHubArtifactUrl(clawhubPackage.packageName, clawhubPackage.version));
+  const artifactUrl = clawHubArtifactUrl(clawhubPackage.packageName, clawhubPackage.version);
+  let payload;
+  try {
+    payload = await fetchJsonWithRetries(artifactUrl);
+  } catch (error) {
+    if (String(error?.message ?? error).includes("HTTP 404")) {
+      return {
+        skipped: skip(
+          row,
+          "missing-clawhub-artifact",
+          `${clawhubPackage.packageName}@${clawhubPackage.version} returned HTTP 404`,
+        ),
+      };
+    }
+    throw error;
+  }
   const artifactMetadata = payload.artifact ?? payload.version?.artifact ?? payload.packageVersion?.artifact;
   if (!isRecord(artifactMetadata)) {
     return {
